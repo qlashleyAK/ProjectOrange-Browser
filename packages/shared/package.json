@@ -1,0 +1,19 @@
+{
+  "name": "@orange/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "soak": "tsx scripts/soak.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-deterministic-compat": "0.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

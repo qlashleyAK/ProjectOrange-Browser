@@ -1,0 +1,20 @@
+{
+  "name": "orange",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "pnpm --filter @orange/client dev",
+    "dev:server": "pnpm --filter @orange/server dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "soak": "pnpm --filter @orange/shared soak"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}

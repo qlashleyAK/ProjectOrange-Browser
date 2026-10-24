@@ -1,0 +1,173 @@
+:root {
+  --teal: rgba(90, 255, 220, 0.85);
+  --shield: #33a6ff;
+  --hull: #8cd966;
+  --hull-low: #ff4026;
+  --energy: #ffd84a;
+  --orange: #ff6a10;
+  --warn: #ff3346;
+  --panel: rgba(8, 12, 18, 0.72);
+  --text: #dbe8f2;
+  --dim: #7f93a6;
+  --hud-scale: 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #020306; color: var(--text); font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; user-select: none; }
+canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud .interactive, #hud button, #hud input, #hud select, #hud label { pointer-events: auto; }
+.orange { color: var(--orange); }
+.hidden { display: none !important; }
+
+#boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #020306; z-index: 50; transition: opacity .4s; }
+#boot.gone { opacity: 0; pointer-events: none; }
+.boot-title { font-size: 44px; font-weight: 800; letter-spacing: 6px; }
+.boot-sub { color: var(--dim); margin-top: 8px; }
+
+/* ---------------------------------------------------------------- combat HUD */
+.hud-layer { position: absolute; inset: 0; transform-origin: center; }
+.scaled { transform: scale(var(--hud-scale)); }
+.reticle { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.reticle svg { position: absolute; left: -40px; top: -40px; width: 80px; height: 80px; overflow: visible; }
+.reticle .c { stroke: var(--teal); stroke-width: 2; fill: none; }
+.hc .reticle .c { stroke: #fff; stroke-width: 2.5; }
+.reticle .spread { stroke: var(--teal); stroke-width: 1.5; fill: none; opacity: .8; }
+.joy-ring { position: absolute; left: 50%; top: 50%; border: 1px solid rgba(90,255,220,.35); border-radius: 50%; }
+.joy-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; background: var(--teal); border-radius: 50%; }
+
+.marker { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; font-size: 11px; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.marker .shape { width: 14px; height: 14px; margin: 0 auto 2px; border: 2px solid currentColor; }
+.marker .shape.diamond { transform: rotate(45deg); width: 11px; height: 11px; }
+.marker .shape.circle { border-radius: 50%; }
+.marker .shape.tri { border: none; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 13px solid currentColor; }
+.marker .bars { width: 42px; height: 4px; margin: 2px auto 0; background: rgba(0,0,0,.5); position: relative; }
+.marker .bars i { position: absolute; left: 0; top: 0; bottom: 0; }
+.marker .pw { color: var(--orange); font-weight: 700; }
+.lead { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 2px solid var(--teal); transform: rotate(45deg); }
+.lock { position: absolute; border: 2px solid var(--warn); border-radius: 50%; transform: translate(-50%, -50%); }
+.lock.solid { border-width: 3px; box-shadow: 0 0 10px var(--warn); }
+.edge-arrow { position: absolute; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 14px solid currentColor; transform-origin: center; }
+.hitmark { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; opacity: 0; }
+.hitmark::before, .hitmark::after { content: ''; position: absolute; left: 50%; top: 0; width: 2px; height: 100%; background: #fff; }
+.hitmark::before { transform: rotate(45deg); } .hitmark::after { transform: rotate(-45deg); }
+.hitmark.kill::before, .hitmark.kill::after { background: var(--warn); width: 3px; }
+.dmgnum { position: absolute; font-weight: 700; font-size: 13px; color: #fff; text-shadow: 0 0 3px #000; transform: translate(-50%, -50%); }
+.dmgnum.shield { color: #8fd0ff; }
+.floater { position: absolute; transform: translate(-50%, -50%); font-weight: 800; color: var(--orange); text-shadow: 0 0 6px rgba(0,0,0,.9); font-size: 16px; }
+.dmg-arc { position: absolute; left: 50%; top: 50%; width: 260px; height: 260px; margin: -130px 0 0 -130px; border-radius: 50%; border: 4px solid transparent; border-top-color: rgba(255,64,38,.9); opacity: 0; }
+
+.vitals { position: absolute; left: 28px; bottom: 28px; width: 300px; }
+.bar { height: 12px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.12); margin-top: 6px; position: relative; overflow: hidden; }
+.bar > i { position: absolute; left: 0; top: 0; bottom: 0; transition: width .08s linear; }
+.bar .shimmer { position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); background-size: 60px 100%; animation: shimmer 1.2s linear infinite; }
+@keyframes shimmer { from { background-position: -60px 0; } to { background-position: 360px 0; } }
+.bar-label { font-size: 11px; color: var(--dim); display: flex; justify-content: space-between; margin-top: 4px; }
+.protected { color: #8fd0ff; font-weight: 700; letter-spacing: 1px; font-size: 12px; margin-bottom: 4px; }
+
+.weapons { position: absolute; right: 28px; bottom: 28px; width: 300px; text-align: right; }
+.ammo { display: flex; gap: 5px; justify-content: flex-end; margin-top: 8px; }
+.ammo i { width: 10px; height: 16px; border: 1px solid #cfe; }
+.ammo i.full { background: #cfe; }
+.icons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; align-items: flex-end; }
+.icon { width: 46px; height: 46px; border-radius: 50%; position: relative; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; letter-spacing: .5px; }
+.icon .ring { position: absolute; inset: -3px; border-radius: 50%; }
+.icon.ready { box-shadow: 0 0 10px rgba(90,255,220,.6); }
+.icon.active { box-shadow: 0 0 14px rgba(160,120,255,.9); }
+.icon.locked { opacity: .35; }
+.icon .key { position: absolute; bottom: -14px; font-size: 9px; color: var(--dim); }
+.dodge-tick { width: 26px; height: 6px; background: rgba(255,255,255,.2); margin-left: auto; margin-top: 16px; }
+.dodge-tick.ready { background: var(--teal); }
+.assist { font-size: 11px; color: var(--dim); margin-top: 6px; }
+
+.power { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); text-align: center; }
+.pips { display: flex; gap: 4px; justify-content: center; }
+.pips i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255,106,16,.6); background: rgba(0,0,0,.5); }
+.pips i.on { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+.pips i.tier { border-color: #fff; }
+.tier-name { margin-top: 4px; font-weight: 700; letter-spacing: 1px; }
+.tier-next { font-size: 11px; color: var(--dim); }
+.power.flourish .pips i.on { animation: pulse .6s ease-out 2; }
+@keyframes pulse { 50% { transform: scale(1.5); } }
+
+.threats { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); text-align: center; }
+.warn { color: var(--warn); font-weight: 800; letter-spacing: 3px; font-size: 18px; text-shadow: 0 0 8px rgba(255,51,70,.7); animation: blink .35s steps(2) infinite; }
+.warn.locking { font-size: 14px; animation-duration: .6s; }
+@keyframes blink { 50% { opacity: .35; } }
+
+.match { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); text-align: center; }
+.timer { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.score { font-size: 12px; color: var(--dim); }
+.banner { position: absolute; left: 50%; top: 26%; transform: translateX(-50%); font-size: 34px; font-weight: 800; letter-spacing: 5px; text-shadow: 0 0 12px rgba(0,0,0,.9); text-align: center; }
+.banner small { display: block; font-size: 14px; letter-spacing: 2px; color: var(--dim); font-weight: 600; }
+.location { position: absolute; left: 24px; top: 18px; font-weight: 700; letter-spacing: 2px; font-size: 13px; text-transform: uppercase; }
+.location small { display: block; color: var(--dim); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.killfeed { position: absolute; right: 24px; top: 18px; width: 380px; text-align: right; }
+.killfeed div { background: var(--panel); padding: 3px 8px; margin-bottom: 3px; display: inline-block; font-size: 12px; clear: both; float: right; }
+.killfeed .me { outline: 1px solid rgba(255,255,255,.4); }
+.toasts { position: absolute; left: 50%; top: 66%; transform: translateX(-50%); text-align: center; }
+.toast { font-weight: 800; letter-spacing: 2px; font-size: 15px; margin-top: 4px; text-shadow: 0 0 8px #000; transition: opacity .3s; }
+.netwarn { position: absolute; left: 24px; top: 70px; color: #ffcf4a; font-size: 12px; font-weight: 700; }
+.hint { position: absolute; left: 24px; top: 70px; font-size: 12px; color: var(--dim); }
+.subtitle { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(0,0,0,.6); padding: 4px 12px; font-size: 14px; }
+
+.cockpit-fleet { position: absolute; inset: 0; background:
+  linear-gradient(to bottom, rgba(10,14,20,.9), transparent 9%), linear-gradient(to top, rgba(10,14,20,.95), transparent 16%),
+  linear-gradient(to right, rgba(10,14,20,.85), transparent 7%), linear-gradient(to left, rgba(10,14,20,.85), transparent 7%); }
+.cockpit-machine { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(80,0,10,.55) 100%); }
+.cockpit-machine::after { content: ''; position: absolute; left: 0; right: 0; height: 30%; background: linear-gradient(to bottom, transparent, rgba(255,40,60,.07), transparent); animation: scan 2.4s linear infinite; }
+@keyframes scan { from { top: -30%; } to { top: 100%; } }
+.death-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(120,0,0,.45)); }
+.hurt-flash { position: absolute; inset: 0; box-shadow: inset 0 0 120px rgba(255,40,30,.6); opacity: 0; }
+
+/* ---------------------------------------------------------------- panels */
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(2,4,8,.55); pointer-events: auto; }
+.panel { background: rgba(8,12,18,.92); border: 1px solid rgba(255,255,255,.1); padding: 22px 26px; min-width: 360px; max-height: 90vh; overflow: auto; }
+.panel h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: 5px; }
+.panel h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 3px; }
+.panel .sub { color: var(--dim); margin-bottom: 16px; }
+.btn { display: block; width: 100%; padding: 11px 14px; margin: 8px 0; background: #16202c; border: 1px solid #2b3d50; color: var(--text); font: inherit; font-weight: 700; letter-spacing: 1px; cursor: pointer; text-align: left; }
+.btn:hover { background: #1f2e3e; border-color: #5affdc; }
+.btn.primary { background: #123a3a; border-color: #2fa; }
+.btn small { display: block; font-weight: 400; color: var(--dim); letter-spacing: 0; }
+.row { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+.row label { flex: 1; color: var(--dim); }
+.row input[type=range] { flex: 1.4; }
+.row input[type=text], .row select { flex: 1.4; background: #0e151e; border: 1px solid #2b3d50; color: var(--text); padding: 6px; font: inherit; }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tabs button { flex: 1; padding: 6px; background: #121a24; border: 1px solid #2b3d50; color: var(--dim); cursor: pointer; font: inherit; }
+.tabs button.on { color: var(--text); border-color: #5affdc; }
+.keys { columns: 2; font-size: 12px; color: var(--dim); }
+.keys b { color: var(--text); display: inline-block; min-width: 70px; }
+
+.classes { display: grid; grid-template-columns: repeat(4, 180px); gap: 12px; margin-top: 14px; }
+.card { background: #0e151e; border: 2px solid #2b3d50; padding: 12px; cursor: pointer; pointer-events: auto; }
+.card:hover { border-color: #5a8; }
+.card.sel { border-color: #5affdc; box-shadow: 0 0 14px rgba(90,255,220,.35); }
+.card h3 { margin: 0; letter-spacing: 2px; }
+.card .arch { font-size: 11px; color: var(--dim); min-height: 30px; }
+.card .stat { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-top: 5px; color: var(--dim); }
+.card .stat span { width: 62px; }
+.card .stat i { flex: 1; height: 6px; background: #1c2733; position: relative; }
+.card .stat i b { position: absolute; left: 0; top: 0; bottom: 0; background: #9fe8ff; }
+.card .kit { font-size: 11px; margin-top: 8px; color: #bcd; }
+.death-title { font-size: 26px; font-weight: 800; letter-spacing: 4px; color: var(--warn); }
+
+.scoreboard table, .postmatch table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.scoreboard td, .scoreboard th, .postmatch td, .postmatch th { padding: 5px 10px; text-align: left; }
+.scoreboard th, .postmatch th { color: var(--dim); font-weight: 600; font-size: 12px; }
+.scoreboard tr.me, .postmatch tr.me { background: rgba(90,255,220,.12); }
+.bot { color: var(--dim); font-size: 11px; }
+.podium { display: flex; gap: 16px; justify-content: center; align-items: flex-end; margin: 12px 0 18px; }
+.podium div { background: #121a24; padding: 10px 16px; text-align: center; min-width: 120px; }
+.podium .p1 { padding-top: 28px; border: 1px solid #ffe27a; }
+.podium .p2 { padding-top: 16px; }
+
+.debug { position: absolute; left: 24px; top: 110px; font: 11px/1.4 ui-monospace, monospace; background: rgba(0,0,0,.6); padding: 6px 10px; white-space: pre; }
+.connecting { font-size: 18px; letter-spacing: 2px; }
+
+@media (max-width: 1100px) {
+  .vitals, .weapons { width: 220px; }
+  .power { bottom: 120px; }
+  .pips i { width: 11px; height: 11px; }
+}

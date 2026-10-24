@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Orange — Ship Viewer</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0d12; color: #cfe; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+      #ui { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,.6); padding: 10px 12px; border-radius: 6px; z-index: 2; }
+      #ui button, #ui label { margin: 2px 4px 2px 0; }
+      #ui button { background: #1b2430; color: #cfe; border: 1px solid #345; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+      #ui button.on { background: #2a6a70; }
+      #stats { margin-top: 6px; white-space: pre; font-family: ui-monospace, monospace; font-size: 12px; }
+      #sil { position: fixed; bottom: 10px; left: 10px; display: grid; grid-template-columns: repeat(4, 64px); gap: 6px; background: #fff; padding: 6px; z-index: 2; }
+      #sil canvas { width: 64px; height: 64px; image-rendering: pixelated; }
+      canvas#view { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="ui"></div>
+    <div id="sil"></div>
+    <canvas id="view"></canvas>
+    <script type="module" src="/src/viewer.ts"></script>
+  </body>
+</html>
