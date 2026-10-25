@@ -77,7 +77,8 @@ export function updateProjectiles(sim: GameSim): void {
         sim.absorbBulwark(bulwark, p.damage, hp);
       } else if (torpedo) {
         torpedo.hp -= p.damage;
-        if (torpedo.hp <= 0) endMissile(sim, torpedo, 'torpedo', torpedo.pos, false);
+        // a shot-down torpedo still goes off — it's slow and juicy, not a free dud.
+        if (torpedo.hp <= 0) endMissile(sim, torpedo, 'torpedo', torpedo.pos, true);
         detonate(sim, p, hp, -1);
       } else {
         detonate(sim, p, hp, -1);

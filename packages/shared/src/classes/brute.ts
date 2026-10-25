@@ -5,7 +5,8 @@ import type { ShipClassDef } from './types.js';
 export const brute: ShipClassDef = {
   id: 'brute', index: 3, name: 'Brute', faction: 'machine', archetype: 'Heavy / area denial',
   size: v3(7.4, 3.8, 12.6),
-  mass: 32_000, hull: 200, shield: 140, shieldRegenDelay: 5.0, shieldRegenRate: 14,
+  // Shield +10% (140 -> 154): more survivable up front, before the hull is ever exposed.
+  mass: 32_000, hull: 200, shield: 154, shieldRegenDelay: 5.0, shieldRegenRate: 14,
   maxSpeed: { fwd: 46, reverse: 25, strafe: 30, vertical: 30 },
   accel: { fwd: 32, lateral: 24, vertical: 24 },
   boostSpeedMult: 1.5, boostAccelMult: 1.6, boostDrain: 0.3, boostRegen: 0.2,

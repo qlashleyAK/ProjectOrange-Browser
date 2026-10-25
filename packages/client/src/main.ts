@@ -262,7 +262,7 @@ async function boot(): Promise<void> {
     if (session) { session.source.dispose(); session = null; }
     shipR.update([], 0, 0);
     projR.update([]);
-    missileR.update([], 0);
+    missileR.update([], 0, renderer.camera);
     pickupR.update([], 0, renderer.camera);
     effects.clear();
     audio.stopAllLoops();
@@ -411,7 +411,7 @@ async function boot(): Promise<void> {
     if (L?.alive && L.bulwarkHp > 0) shipR.setBulwarkHealth(localId, L.bulwarkHp / BULWARK_ABSORB);
     projR.update(src.projectiles());
     const missiles = src.missiles();
-    missileR.update(missiles, dt);
+    missileR.update(missiles, dt, renderer.camera);
     pickupR.update(src.pickups(), time, renderer.camera);
     const placeId = arenaView.updateVisibility(camPos);
     lights.updateStatic(placeId, camPos);

@@ -26,6 +26,15 @@ export interface PrimaryDef {
   muzzle: 'alternate' | 'all' | 'center';
   color: number;
   visual: ProjectileVisual;
+  /**
+   * Limited homing ("soft aim assist"), applied once at the moment of firing — the shot never
+   * curves in flight, so remote-client straight-line extrapolation of projectiles stays valid.
+   * If an enemy (with line of sight) falls within `seekConeDeg` of the aimed direction and within
+   * `seekRange`, the shot is bent up to `seekBendDeg` toward them.
+   */
+  seekConeDeg?: number;
+  seekBendDeg?: number;
+  seekRange?: number;
 }
 
 export type SecondaryKind = 'missile' | 'swarm' | 'torpedo';

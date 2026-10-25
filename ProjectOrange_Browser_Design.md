@@ -281,7 +281,7 @@ factions in free-for-all and become teams in a later team mode.
 | Size L × W × H (m) | 8.6 × 5.8 × 2.6 | 9.8 × 5.6 × 3.0 | 5.6 × 9.2 × 1.8 | 12.6 × 7.4 × 3.8 |
 | Mass (t) | 10 | 18 | 7 | 32 |
 | Hull | 100 | 130 | 70 | 200 |
-| Shield | 90 | 110 | 60 | 140 |
+| Shield | 90 | 110 | 60 | 154 |
 | Shield regen delay / rate | 3.5 s / 15 /s | 3.0 s / 18 /s | 4.0 s / 12 /s | 5.0 s / 14 /s |
 | Max speed fwd / reverse (m/s) | 70 / 40 | 58 / 45 | 80 / 35 | 46 / 25 |
 | Max speed strafe / vertical | 45 / 45 | 52 / 52 | 40 / 40 | 30 / 30 |
@@ -292,7 +292,7 @@ factions in free-for-all and become teams in a later team mode.
 | Angular accel pitch / yaw / roll (°/s²) | 600 / 600 / 900 | 400 / 400 / 600 | 800 / 800 / 1200 | 250 / 250 / 400 |
 | Energy max / regen (/s) | 100 / 24 | 120 / 20 | 100 / 26 | 140 / 18 |
 | Dodge Δv / cooldown | 26 m/s / 1.2 s | 30 / 1.4 s | 30 / 1.0 s | 16 / 2.0 s |
-| Repel shove taken | 100% | 100% | 100% | 50% (Heavy Frame) |
+| Repel shove taken | 100% | 100% | 90% (Light Frame) | 50% (Heavy Frame) |
 
 Shield damage is absorbed first and overflow goes to the hull. Shields
 regenerate after the delay with no damage taken. **The hull never
@@ -333,11 +333,11 @@ any Scythe it touches. It breaks every missile lock on the Mule, and missiles
 already in flight toward it lose track. 18 s cooldown.
 
 **Scythe — Ripper Spines (primary).**
-3 shots/s; 22 damage; 380 m/s; 1.3 s life (≈500 m); radius 0.3 m; 12 energy
+3 shots/s; 24 damage; 380 m/s; 1.3 s life (≈500 m); radius 0.3 m; 12 energy
 per shot.
 
 **Scythe — Hunter Missile (secondary).**
-2 at spawn. Lock 0.9 s inside a 12° cone, ≤ 450 m. 85 damage plus 5 m
+2 at spawn. Lock 0.81 s inside a 12° cone, ≤ 450 m. 85 damage plus 5 m
 splash; 120 m/s; turn 120°/s; 6 s life; 2.0 s refire.
 
 **Scythe — Phase Cloak (ability).**
@@ -361,7 +361,8 @@ falloff. Proximity fuse detonates within 4 m of an enemy hit volume.
 2 at spawn. Lock 1.2 s inside a 10° cone, ≤ 500 m. 130 damage plus 10 m
 splash with falloff; 80 m/s; turn 45°/s; 9 s life; 3.0 s refire.
 **The torpedo is shootable:** 40 HP and a 1.0 m hit sphere; any projectile
-can destroy it.
+can destroy it, which detonates it for its full splash damage — it's slow
+and juicy, not a free dud.
 
 **Brute — Bulwark (ability).**
 Lasts 4 s: a curved energy barrier, a disc of 11 m diameter centered 8 m
@@ -374,12 +375,12 @@ Brute's own shots pass through. 20 s cooldown.
 The table below assumes the attacker's primary only, every shot hitting, and
 full shields and hull on the target.
 
-| Attacker → target | Dart (190) | Mule (240) | Scythe (130) | Brute (340) |
+| Attacker → target | Dart (190) | Mule (240) | Scythe (130) | Brute (354) |
 |---|---:|---:|---:|---:|
-| Dart, 64 DPS | 3.0 s | 3.8 s | 2.0 s | 5.3 s |
-| Mule, ~75 DPS point-blank | 2.5 s | 3.2 s | 1.7 s | 4.5 s |
-| Scythe, 66 DPS / 22 alpha | 2.9 s | 3.6 s | 2.0 s | 5.2 s |
-| Brute, ~55 DPS + splash | 3.5 s | 4.4 s | 2.4 s | 6.2 s |
+| Dart, 64 DPS | 3.0 s | 3.8 s | 2.0 s | 5.5 s |
+| Mule, ~75 DPS point-blank | 2.5 s | 3.2 s | 1.7 s | 4.7 s |
+| Scythe, 72 DPS / 24 alpha | 2.6 s | 3.3 s | 1.8 s | 4.9 s |
+| Brute, ~55 DPS + splash | 3.5 s | 4.4 s | 2.4 s | 6.4 s |
 
 Target 2–6 s TTK under perfect aim; real fights run 2–3× longer. If a
 playtest shows a dominant class, adjust that class's numbers. Don't flatten
@@ -460,6 +461,10 @@ volleys/s, 7 damage per bolt, 300 m/s, 6 energy per volley.
 
 Arc Slug is a single heavy slug: 40 damage plus 3 m splash, 2.2 shots/s,
 320 m/s, 2.0 s life, 16 energy. It is the Mule's long-range answer.
+**Limited homing:** if an enemy (with line of sight) is within an 8° cone
+of the aimed shot and within 260 m, the slug bends up to 6° onto them at
+the moment of firing — never mid-flight — forgiving imperfect lead
+without turning it into a dumb-fire missile.
 
 **Scythe**
 
@@ -471,7 +476,7 @@ Arc Slug is a single heavy slug: 40 damage plus 3 m splash, 2.2 shots/s,
 | 8 | Twin Spines | **altPrimary: Twin Spines**, shield ×1.2, +1 missile, Repel |
 | 10 | Reaper | Twin Spines, damage ×1.2, cadence ×1.2, shield ×1.25, +2 missiles, Repel, cloak cooldown ×0.75 |
 
-Twin Spines fires 2 bolts in a 2° spread at 3 shots/s, 20 damage each,
+Twin Spines fires 2 bolts in a 2° spread at 3 shots/s, 22 damage each,
 14 energy per shot.
 
 **Brute**

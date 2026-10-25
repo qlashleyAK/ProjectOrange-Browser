@@ -1,6 +1,6 @@
 import {
-  activePrimary, addArenaColliders, applyFlightControl, cadenceTicks, classByIndex, copyFlightState, createShipBody, createWorld,
-  CORRECTION_TAU, DT, HARD_SNAP_ANGLE, HARD_SNAP_DIST, InputFlag, newFlightState, OVERDRIVE_CADENCE, PREDICTION_HISTORY,
+  activePrimary, addArenaColliders, applyFlightControl, applyPrimarySeek, cadenceTicks, classByIndex, copyFlightState, createShipBody,
+  createWorld, CORRECTION_TAU, DT, HARD_SNAP_ANGLE, HARD_SNAP_DIST, InputFlag, newFlightState, OVERDRIVE_CADENCE, PREDICTION_HISTORY,
   projectileCount, q4, qangle, qconj, qmul, qnorm, qslerp, resolveTier, shotIdFor, v3, volleyShots,
   type ArenaData, type FlightState, type InputCmd, type MuzzleShot, type OwnerSnap, type PrimaryDef, type Q4, type RAPIER,
   type ShipClassDef, type V3,
@@ -149,6 +149,10 @@ export class Predictor {
     st.sinceFire = 0;
     const shotId = shotIdFor(this.shipId, cmd.seq, 0);
     const shots = volleyShots(def, w, projectileCount(w, def, tier), this.pos, this.rot, st.muzzleIndex, shotId);
+    if (w.seekConeDeg) {
+      const candidates = Array.from(this.proxies.values(), (p) => { const t = p.body.translation(); return v3(t.x, t.y, t.z); });
+      applyPrimarySeek(this.world, w, shots, candidates);
+    }
     if (w.muzzle === 'alternate') st.muzzleIndex++;
     return { shotId, weapon: w, shots };
   }

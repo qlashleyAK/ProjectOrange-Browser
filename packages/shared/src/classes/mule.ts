@@ -16,9 +16,12 @@ export const mule: ShipClassDef = {
     speed: 240, life: 0.8, radius: 0.2, damage: 6, muzzle: 'center', color: 0xe6f4ff, visual: 'pellet',
   },
   altPrimary: {
+    // Limited homing: a small aim-assist cone snaps the shot onto a nearby enemy at the moment
+    // of firing (never mid-flight), so it forgives imperfect lead instead of being a pure-skill slug.
     id: 'arcSlug', name: 'Arc Slug', rate: 2.2, energy: 16, count: 1, pattern: 'single', spreadDeg: 0,
     speed: 320, life: 2.0, radius: 0.35, damage: 40, splashRadius: 3, splashDamage: 40, splashMinFrac: 0,
     muzzle: 'center', color: 0x5aa0ff, visual: 'slug',
+    seekConeDeg: 8, seekBendDeg: 6, seekRange: 260,
   },
   secondary: {
     id: 'swarm', name: 'Swarm Pod', kind: 'swarm', ammo: 3, count: 6, lockTime: 0.4, lockConeDeg: 20,

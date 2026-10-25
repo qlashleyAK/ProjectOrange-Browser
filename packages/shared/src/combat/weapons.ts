@@ -1,8 +1,10 @@
+import type * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
 import type { PrimaryDef, ShipClassDef } from '../classes/types.js';
 import { CONVERGE_DISTANCE, DT, PROJECTILE_CAP_PER_SHIP } from '../constants.js';
 import type { Ship } from '../entities.js';
 import type { GameSim } from '../game.js';
-import { DEG, qrot, v3, vnorm, type Q4, type V3 } from '../math.js';
+import { DEG, qrot, v3, vdot, vlen, vnorm, type Q4, type V3 } from '../math.js';
+import { lineOfSight } from '../physicsWorld.js';
 import type { TierEffect } from '../power.js';
 import { hash32 } from '../rng.js';
 
@@ -82,6 +84,44 @@ export function volleyShots(
   return shots;
 }
 
+/** Slerp-style angle-limited turn from unit vector `from` toward unit vector `to`. */
+function bendTowards(out: V3, from: V3, to: V3, maxAngle: number): V3 {
+  const cos = Math.max(-1, Math.min(1, vdot(from, to)));
+  const ang = Math.acos(cos);
+  if (ang <= maxAngle || ang < 1e-6) { out.x = to.x; out.y = to.y; out.z = to.z; return out; }
+  const s = Math.sin(ang), t = maxAngle / ang;
+  const k0 = Math.sin((1 - t) * ang) / s, k1 = Math.sin(t * ang) / s;
+  return vnorm(out, v3(from.x * k0 + to.x * k1, from.y * k0 + to.y * k1, from.z * k0 + to.z * k1));
+}
+
+/**
+ * Limited homing for primaries like the Mule's Arc Slug: a one-time snap at the moment of
+ * firing, never mid-flight, so straight-line extrapolation on remote clients stays correct.
+ * Mutates each shot's `dir` in place toward the best in-cone, in-range, line-of-sight target.
+ */
+export function applyPrimarySeek(world: RAPIER.World, w: PrimaryDef, shots: MuzzleShot[], candidates: V3[]): void {
+  if (!w.seekConeDeg || !w.seekBendDeg || candidates.length === 0) return;
+  const coneCos = Math.cos(w.seekConeDeg * DEG);
+  const maxBend = w.seekBendDeg * DEG;
+  const range = w.seekRange ?? w.speed * w.life;
+  const toTarget = v3();
+  for (const sh of shots) {
+    let bestCos = coneCos;
+    let best: V3 | null = null;
+    for (const p of candidates) {
+      toTarget.x = p.x - sh.origin.x; toTarget.y = p.y - sh.origin.y; toTarget.z = p.z - sh.origin.z;
+      const d = vlen(toTarget);
+      if (d < 1 || d > range) continue;
+      const ux = toTarget.x / d, uy = toTarget.y / d, uz = toTarget.z / d;
+      const cos = sh.dir.x * ux + sh.dir.y * uy + sh.dir.z * uz;
+      if (cos <= bestCos) continue;
+      if (!lineOfSight(world, sh.origin, p)) continue;
+      bestCos = cos; best = v3(ux, uy, uz);
+    }
+    if (best) bendTowards(sh.dir, sh.dir, best, maxBend);
+  }
+}
+
 export function shotIdFor(shipId: number, seq: number, slot: number): number {
   return hash32(shipId, seq, slot) & 0x7fffffff;
 }
@@ -100,6 +140,10 @@ export function firePrimary(sim: GameSim, s: Ship): boolean {
   s.primaryLastFire = sim.tick;
   const shotId = shotIdFor(s.id, s.input.seq, 0);
   const shots = volleyShots(s.def, w, count, s.pos, s.rot, s.muzzleIndex, shotId);
+  if (w.seekConeDeg) {
+    const candidates = sim.shipList.filter((o) => o.alive && o.id !== s.id && sim.canSee(s, o)).map((o) => o.pos);
+    applyPrimarySeek(sim.world, w, shots, candidates);
+  }
   if (w.muzzle === 'alternate') s.muzzleIndex++;
   let mult = s.tier.damage;
   if (s.ambushReady) { mult *= 1.5; s.ambushReady = false; }

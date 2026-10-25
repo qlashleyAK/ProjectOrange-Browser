@@ -69,48 +69,110 @@ export class ProjectileRenderer {
   }
 }
 
-interface Trail { line: THREE.Line; pts: Float32Array; colors: Float32Array; count: number; lastSeen: number; smokeT: number; color: THREE.Color }
-const TRAIL_POINTS = 40;
+const TRAIL_SAMPLES = 32;
+const TRAIL_FADE = 1.5;
+const WARM = new THREE.Color(0xfff1d6);
+const TORPEDO = new THREE.Color(0xff3fd0);
 
-/** Missiles: small glowing bodies with ribbon-ish line trails and smoke. */
+interface Trail {
+  mesh: THREE.Mesh;
+  hist: Float32Array;
+  count: number;
+  color: THREE.Color;
+  width: number;
+  lastSeen: number;
+  /** seconds of fade left once the missile is gone; negative while it is still flying */
+  fade: number;
+  smokeT: number;
+}
+
+function ribbonMesh(): THREE.Mesh {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_SAMPLES * 2 * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL_SAMPLES * 2 * 3), 3));
+  const index = new Uint16Array((TRAIL_SAMPLES - 1) * 6);
+  for (let i = 0; i < TRAIL_SAMPLES - 1; i++) {
+    const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+    index.set([a, b, d, a, d, c], i * 6);
+  }
+  geo.setIndex(new THREE.BufferAttribute(index, 1));
+  geo.setDrawRange(0, 0);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide,
+  }));
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/** Missiles: a bright body, a camera-facing ribbon, and a short smoke wake. The ribbon fades for 1.5 s after impact. */
 export class MissileRenderer {
   private bodies: THREE.InstancedMesh;
+  private glow: THREE.InstancedMesh;
   private trails = new Map<number, Trail>();
   private pool: Trail[] = [];
   private group = new THREE.Group();
   private frame = 0;
+  private side = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, private effects: Effects) {
-    const g = new THREE.CylinderGeometry(0.12, 0.2, 1.4, 6);
-    g.rotateX(Math.PI / 2);
-    this.bodies = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({}), 128);
+    const g = new THREE.CylinderGeometry(0.18, 0.55, 4.2, 8);
+    g.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
+    this.bodies = new THREE.InstancedMesh(g, mat, 128);
     this.bodies.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(128 * 3), 3);
     this.bodies.frustumCulled = false;
     this.bodies.count = 0;
-    scene.add(this.bodies, this.group);
+    this.glow = new THREE.InstancedMesh(new THREE.SphereGeometry(0.7, 8, 6), mat, 128);
+    this.glow.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(128 * 3), 3);
+    this.glow.frustumCulled = false;
+    this.glow.count = 0;
+    scene.add(this.bodies, this.glow, this.group);
   }
 
-  private trail(id: number, color: number): Trail {
+  private trail(id: number, color: number, width: number): Trail {
     let t = this.trails.get(id);
     if (t) return t;
     t = this.pool.pop();
-    if (!t) {
-      const pts = new Float32Array(TRAIL_POINTS * 3), colors = new Float32Array(TRAIL_POINTS * 3);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-      line.frustumCulled = false;
-      t = { line, pts, colors, count: 0, lastSeen: 0, smokeT: 0, color: new THREE.Color() };
-    }
+    if (!t) t = { mesh: ribbonMesh(), hist: new Float32Array(TRAIL_SAMPLES * 3), count: 0, color: new THREE.Color(), width, lastSeen: 0, fade: -1, smokeT: 0 };
     t.count = 0;
-    t.color.set(color === 0xff3fd0 ? 0xff3fd0 : 0xfff1d6);
-    this.group.add(t.line);
+    t.fade = -1;
+    t.width = width;
+    t.color.copy(color === TORPEDO.getHex() ? TORPEDO : WARM);
+    this.group.add(t.mesh);
     this.trails.set(id, t);
     return t;
   }
 
-  update(list: MissileView[], dt: number): void {
+  private layRibbon(t: Trail, camera: THREE.Camera, alpha: number): void {
+    const pos = t.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const col = t.mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const p = pos.array as Float32Array;
+    const c = col.array as Float32Array;
+    const n = t.count;
+    const cam = camera.position;
+    for (let i = 0; i < n; i++) {
+      const x = t.hist[i * 3]!, y = t.hist[i * 3 + 1]!, z = t.hist[i * 3 + 2]!;
+      const j = i === 0 ? 1 : i - 1;
+      const dx = t.hist[j * 3]! - x, dy = t.hist[j * 3 + 1]! - y, dz = t.hist[j * 3 + 2]! - z;
+      this.side.set(dy * (cam.z - z) - dz * (cam.y - y), dz * (cam.x - x) - dx * (cam.z - z), dx * (cam.y - y) - dy * (cam.x - x));
+      if (this.side.lengthSq() < 1e-6) this.side.set(0, 1, 0);
+      else this.side.normalize();
+      const w = t.width * Math.pow(1 - i / TRAIL_SAMPLES, 0.7);
+      this.side.multiplyScalar(w);
+      const o = i * 6;
+      p[o] = x + this.side.x; p[o + 1] = y + this.side.y; p[o + 2] = z + this.side.z;
+      p[o + 3] = x - this.side.x; p[o + 4] = y - this.side.y; p[o + 5] = z - this.side.z;
+      const k = alpha * Math.pow(1 - i / TRAIL_SAMPLES, 1.3) * 2.4;
+      c[o] = c[o + 3] = t.color.r * k;
+      c[o + 1] = c[o + 4] = t.color.g * k;
+      c[o + 2] = c[o + 5] = t.color.b * k;
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    t.mesh.geometry.setDrawRange(0, Math.max(0, n - 1) * 6);
+  }
+
+  update(list: MissileView[], dt: number, camera: THREE.Camera): void {
     this.frame++;
     let n = 0;
     for (const m of list) {
@@ -118,45 +180,47 @@ export class MissileRenderer {
       _d.set(m.vel.x / speed, m.vel.y / speed, m.vel.z / speed);
       _p.set(m.pos.x, m.pos.y, m.pos.z);
       _q.setFromUnitVectors(Z, _d);
-      const big = m.kind === 'torpedo' ? 2.2 : m.kind === 'swarm' ? 0.7 : 1;
-      _s.setScalar(big);
+      const big = m.kind === 'torpedo' ? 2.4 : m.kind === 'swarm' ? 0.55 : 1.15;
+      _s.set(big, big, big * 1.15);
       _m.compose(_p, _q, _s);
+      const glowPos = _p.clone().addScaledVector(_d, -1.3 * big);
       if (n < 128) {
         this.bodies.setMatrixAt(n, _m);
-        this.bodies.setColorAt(n, _c.set(m.color).multiplyScalar(m.kind === 'torpedo' ? 6 : 3));
+        this.bodies.setColorAt(n, _c.copy(m.color === TORPEDO.getHex() ? TORPEDO : WARM).multiplyScalar(m.kind === 'torpedo' ? 7 : 5));
+        _s.setScalar(big * 1.6);
+        _m.compose(glowPos, _q, _s);
+        this.glow.setMatrixAt(n, _m);
+        this.glow.setColorAt(n, _c.multiplyScalar(0.45));
         n++;
       }
-      const t = this.trail(m.id, m.color);
+      const t = this.trail(m.id, m.color, (m.kind === 'torpedo' ? 1.8 : m.kind === 'swarm' ? 0.45 : 0.9) * 1);
       t.lastSeen = this.frame;
-      // shift points
-      if (t.count < TRAIL_POINTS) t.count++;
-      t.pts.copyWithin(3, 0, (TRAIL_POINTS - 1) * 3);
-      t.pts[0] = _p.x; t.pts[1] = _p.y; t.pts[2] = _p.z;
-      for (let i = 0; i < TRAIL_POINTS; i++) {
-        const k = i < t.count ? Math.pow(1 - i / TRAIL_POINTS, 1.6) * 2.2 : 0;
-        t.colors[i * 3] = t.color.r * k; t.colors[i * 3 + 1] = t.color.g * k; t.colors[i * 3 + 2] = t.color.b * k;
-      }
-      if (t.count < TRAIL_POINTS) for (let i = t.count; i < TRAIL_POINTS; i++) { t.pts[i * 3] = _p.x; t.pts[i * 3 + 1] = _p.y; t.pts[i * 3 + 2] = _p.z; }
-      const geo = t.line.geometry;
-      geo.attributes.position!.needsUpdate = true;
-      geo.attributes.color!.needsUpdate = true;
-      geo.setDrawRange(0, t.count);
+      t.fade = -1;
+      if (t.count < TRAIL_SAMPLES) t.count++;
+      t.hist.copyWithin(3, 0, (TRAIL_SAMPLES - 1) * 3);
+      t.hist[0] = _p.x; t.hist[1] = _p.y; t.hist[2] = _p.z;
+      this.layRibbon(t, camera, 1);
       t.smokeT -= dt;
       if (t.smokeT <= 0) {
-        t.smokeT = m.kind === 'swarm' ? 0.06 : 0.035;
-        this.effects.smokeAt(_p.clone().addScaledVector(_d, -0.8 * big), _d.clone().multiplyScalar(-3), 0.6 * big, 1.5, 0x9aa0a8, 2.2);
-        this.effects.flash(_p.clone().addScaledVector(_d, -0.8 * big), m.color === 0xff3fd0 ? 0xff3fd0 : 0xfff1d6, 0.5 * big, 0.3 * big, 0.06);
+        t.smokeT = m.kind === 'swarm' ? 0.12 : 0.08;
+        this.effects.smokeAt(glowPos, _d.clone().multiplyScalar(-6), 0.7 * big, 0.9, 0x8d939c, 1.3);
       }
     }
-    this.bodies.count = n;
-    this.bodies.instanceMatrix.needsUpdate = true;
+    this.bodies.count = this.glow.count = n;
+    this.bodies.instanceMatrix.needsUpdate = this.glow.instanceMatrix.needsUpdate = true;
     if (this.bodies.instanceColor) this.bodies.instanceColor.needsUpdate = true;
+    if (this.glow.instanceColor) this.glow.instanceColor.needsUpdate = true;
     for (const [id, t] of this.trails) {
-      if (t.lastSeen !== this.frame) {
-        this.group.remove(t.line);
+      if (t.lastSeen === this.frame) continue;
+      if (t.fade < 0) t.fade = TRAIL_FADE;
+      t.fade -= dt;
+      if (t.fade <= 0 || t.count < 2) {
+        this.group.remove(t.mesh);
         this.trails.delete(id);
         this.pool.push(t);
+        continue;
       }
+      this.layRibbon(t, camera, t.fade / TRAIL_FADE);
     }
   }
 }

@@ -10,17 +10,20 @@ export const scythe: ShipClassDef = {
   boostSpeedMult: 1.7, boostAccelMult: 1.6, boostDrain: 0.45, boostRegen: 0.25,
   maxRate: { pitch: 150 * DEG, yaw: 150 * DEG, roll: 280 * DEG },
   angAccel: { pitch: 800 * DEG, yaw: 800 * DEG, roll: 1200 * DEG },
-  energyMax: 100, energyRegen: 26, dodgeDV: 30, dodgeCooldown: 1.0, repelTaken: 1,
+  // Light frame: takes 10% less Repel knockback than the other classes to offset how easily it gets shoved around.
+  energyMax: 100, energyRegen: 26, dodgeDV: 30, dodgeCooldown: 1.0, repelTaken: 0.9,
   primary: {
+    // +10% damage: thin armor needs to be paid for with more bite.
     id: 'spine', name: 'Ripper Spines', rate: 3, energy: 12, count: 1, pattern: 'single', spreadDeg: 0,
-    speed: 380, life: 1.3, radius: 0.3, damage: 22, muzzle: 'alternate', color: 0xff2a3a, visual: 'spine',
+    speed: 380, life: 1.3, radius: 0.3, damage: 24, muzzle: 'alternate', color: 0xff2a3a, visual: 'spine',
   },
   altPrimary: {
     id: 'twinSpine', name: 'Twin Spines', rate: 3, energy: 14, count: 2, pattern: 'fan', spreadDeg: 2,
-    speed: 380, life: 1.3, radius: 0.3, damage: 20, muzzle: 'all', color: 0xff2a3a, visual: 'spine',
+    speed: 380, life: 1.3, radius: 0.3, damage: 22, muzzle: 'all', color: 0xff2a3a, visual: 'spine',
   },
   secondary: {
-    id: 'hunter', name: 'Hunter Missile', kind: 'missile', ammo: 2, count: 1, lockTime: 0.9, lockConeDeg: 12,
+    // Lock 10% quicker (0.9s -> 0.81s) to make the missile a real threat, not just a poke.
+    id: 'hunter', name: 'Hunter Missile', kind: 'missile', ammo: 2, count: 1, lockTime: 0.81, lockConeDeg: 12,
     lockRange: 450, damage: 85, splashRadius: 5, splashMinFrac: 0, speed: 120, turnDeg: 120, life: 6,
     refire: 2.0, hitRadius: 0.45, color: 0xfff1d6,
   },

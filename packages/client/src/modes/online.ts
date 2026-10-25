@@ -20,7 +20,7 @@ interface CosmeticProj {
   shotId: number; index: number; weapon: PrimaryDef; origin: V3; vel: V3; born: number; maxAge: number;
   serverId: number; confirmed: boolean; view: ProjView;
 }
-interface RemoteMissile { id: number; ownerId: number; kind: string; color: number; buf: InterpBuffer; spawnTick: number; endTick: number }
+interface RemoteMissile { id: number; ownerId: number; kind: string; color: number; buf: InterpBuffer; spawnTick: number; life: number }
 
 const SECONDARY_BY_ID = new Map(CLASS_LIST.map((c) => [c.secondary.id, c.secondary]));
 const PING_INTERVAL = 0.5;
@@ -153,6 +153,8 @@ export class OnlineSource implements ViewSource {
         break;
       case 'ev':
         for (const e of m.list) {
+          // the missile has to exist before its snapshots arrive; the launch effect waits for render time
+          if (e.t === 'missileSpawn') this.ensureMissile(e, m.tick);
           if (this.isImmediate(e)) this.release(e, m.tick);
           else this.queued.push({ tick: m.tick, e });
         }
@@ -174,7 +176,6 @@ export class OnlineSource implements ViewSource {
       case 'tier': case 'ability': case 'dodge': case 'repel': case 'sweep': case 'bulwarkHit': case 'spawn': case 'scrape':
         return e.shipId === me;
       case 'lockOn': return e.targetId === me || e.shipId === me;
-      case 'missileSpawn': return true; // rendered from its own buffer at renderTick
       case 'phase': case 'matchEnd': return true;
       default: return false;
     }
@@ -189,14 +190,7 @@ export class OnlineSource implements ViewSource {
       case 'spawn':
         if (e.shipId === this.shipId) this.deathTick = -1;
         break;
-      case 'missileSpawn': {
-        const sec = SECONDARY_BY_ID.get(e.kind);
-        const buf = new InterpBuffer();
-        buf.push({ tick, pos: { ...e.pos }, rot: q4(), vel: { ...e.vel } }, 0);
-        this.missilesById.set(e.id, { id: e.id, ownerId: e.ownerId, kind: sec?.kind ?? 'missile', color: sec?.color ?? 0xffffff, buf, spawnTick: tick, endTick: -1 });
-        this.queued.push({ tick, e });
-        return;
-      }
+      case 'missileSpawn': this.ensureMissile(e, tick); break;
       case 'missileEnd': this.missilesById.delete(e.id); break;
       case 'pickupSpawn':
         this.pickupMap.set(e.id, { id: e.id, pos: e.pos, units: e.units, drop: e.drop, expireTick: e.expireTick, killerId: e.killerId });
@@ -495,10 +489,24 @@ export class OnlineSource implements ViewSource {
     return out;
   }
 
+  /** Create the interpolation entry once. Later releases of the same launch must not rewind it. */
+  private ensureMissile(e: Extract<GameEvent, { t: 'missileSpawn' }>, tick: number): void {
+    if (this.missilesById.has(e.id)) return;
+    const sec = SECONDARY_BY_ID.get(e.kind);
+    const buf = new InterpBuffer();
+    buf.push({ tick, pos: { ...e.pos }, rot: q4(), vel: { ...e.vel } }, 0);
+    this.missilesById.set(e.id, {
+      id: e.id, ownerId: e.ownerId, kind: sec?.kind ?? 'missile', color: sec?.color ?? 0xffffff,
+      buf, spawnTick: tick, life: sec?.life ?? 5,
+    });
+  }
+
   missiles(): MissileView[] {
     const out: MissileView[] = [];
     const rt = this.renderTick;
-    for (const m of this.missilesById.values()) {
+    for (const [id, m] of this.missilesById) {
+      // a missed end event must not leave a smoker parked in the arena
+      if ((rt - m.spawnTick) * DT > m.life + 0.75) { this.missilesById.delete(id); continue; }
       if (rt < m.spawnTick) continue;
       const pos = v3(), vel = v3();
       if (!m.buf.sample(rt, pos, q4(), vel)) continue;

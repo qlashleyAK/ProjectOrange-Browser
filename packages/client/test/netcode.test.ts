@@ -51,6 +51,18 @@ class ScriptedInput {
   }
 }
 
+/** Sit still, hold secondary, then release so one missile launches straight ahead. */
+class LaunchOnce {
+  tick = 0;
+  beginFrame(): void {}
+  sample(): InputCmd {
+    this.tick++;
+    const c = neutralInput(0, 0);
+    if (this.tick >= 90 && this.tick <= 140) c.flags |= InputFlag.Secondary;
+    return c;
+  }
+}
+
 describe('client netcode against a real room', () => {
   it('predicts the local ship within tolerance at 60 ms RTT and interpolates remotes', () => {
     fakeMs = 1000;
@@ -91,6 +103,47 @@ describe('client netcode against a real room', () => {
     const corrections = (src as unknown as { predictor: { corrections: number } }).predictor.corrections;
     // steady flight in open space should rarely need replays (bot collisions can cause a few)
     expect(corrections).toBeLessThan(60);
+    src.dispose();
+  });
+
+  it('flies a launched missile instead of leaving it and its smoke at the muzzle', () => {
+    fakeMs = 1000;
+    const room = new GameRoom({ id: 'MSL', now: () => fakeMs, seed: 11 });
+    room.sim.forceInProgress();
+    const { t, pump } = wire(room, 30);
+    const src = new OnlineSource(arena, new LaunchOnce(), 'Tester', 'dart', { makeTransport: () => t, offline: false });
+    t.onopen();
+    const frameMs = 1000 / 60;
+    const first = new Map<number, { x: number; y: number; z: number; at: number }>();
+    let spawns = 0;
+    let parked = false;
+    let placed = false;
+    for (let i = 0; i < 60 * 8; i++) {
+      const me = room.sim.ship(src.shipId);
+      if (!placed && me?.alive) {
+        // hub center, nose toward -Z, with open room ahead of the muzzle
+        room.sim.placeShip(me, { x: 0, y: 0, z: 40 });
+        placed = true;
+      }
+      fakeMs += frameMs;
+      pump();
+      room.tick();
+      pump();
+      src.update(frameMs / 1000);
+      for (const e of src.drainEvents()) if (e.t === 'missileSpawn' && e.ownerId === src.shipId) spawns++;
+      for (const m of src.missiles()) {
+        if (m.ownerId !== src.shipId) continue;
+        let seen = first.get(m.id);
+        if (!seen) { seen = { x: m.pos.x, y: m.pos.y, z: m.pos.z, at: i }; first.set(m.id, seen); }
+        // the old bug pinned the missile a few meters from the muzzle and rebuilt it every frame
+        if (i - seen.at > 20 && vdist(seen, m.pos) < 25) parked = true;
+      }
+    }
+    expect(placed).toBe(true);
+    expect(spawns).toBe(1);
+    expect(first.size).toBeGreaterThan(0);
+    expect(parked).toBe(false);
+    expect(src.missiles().filter((m) => m.ownerId === src.shipId)).toHaveLength(0);
     src.dispose();
   });
 });

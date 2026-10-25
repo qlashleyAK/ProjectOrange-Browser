@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  DT, GameSim, InputFlag, PROJECTILE_CAP_PER_SHIP, applyDamage, cadenceTicks, generateArena, hollowdeep, initPhysics,
-  neutralInput, q4, qfromAxisAngle, v3, type ArenaData, type ClassId, type Ship,
+  DT, GameSim, InputFlag, PROJECTILE_CAP_PER_SHIP, applyDamage, cadenceTicks, endMissile, generateArena, hollowdeep, initPhysics,
+  neutralInput, q4, qfromAxisAngle, v3, type ArenaData, type ClassId, type Missile, type Ship,
 } from '../src/index.js';
 
 let arena: ArenaData;
@@ -86,6 +86,19 @@ describe('weapons', () => {
     for (let i = 0; i < 30; i++) sim.step();
     expect(s2.shield).toBeLessThan(s2.maxShield);
   });
+
+  it("Arc Slug's seek cone bends a shot onto a target a dumb-fire slug would have missed", () => {
+    const { sim, s1, s2 } = sim2('mule', 'dart');
+    s1.power = 8; sim.grantPower(s1, 0); // unlock the Arc Slug altPrimary
+    place(sim, s1, OPEN);
+    // 5° off dead-ahead at 100 m: ~8.7 m of lateral miss for a straight shot, but inside the 8° seek cone.
+    const off = 100 * Math.tan(5 * Math.PI / 180);
+    place(sim, s2, v3(OPEN.x + 100, OPEN.y + off, OPEN.z), -1);
+    const shieldBefore = s2.shield;
+    s1.input = { ...neutralInput(), flags: InputFlag.AssistOn | InputFlag.Primary };
+    for (let i = 0; i < 30; i++) sim.step();
+    expect(s2.shield).toBeLessThan(shieldBefore);
+  });
 });
 
 describe('missiles and warnings', () => {
@@ -125,6 +138,25 @@ describe('missiles and warnings', () => {
       ended = sim.drainEvents().some((e) => e.t === 'missileEnd' && e.reason === 'torpedo');
     }
     expect(ended).toBe(true);
+  });
+
+  it('a torpedo destroyed by gunfire explodes for splash damage (but never hurts its own owner)', () => {
+    const { sim, s1, s2 } = sim2('brute', 'dart');
+    place(sim, s1, OPEN);
+    place(sim, s2, at(5), -1); // standing right where the torpedo dies
+    const torp: Missile = {
+      id: sim.nextMissileId(), ownerId: s1.id, def: s1.def.secondary, pos: v3(s2.pos.x - 2, s2.pos.y, s2.pos.z),
+      vel: v3(0, 0, 0), targetId: -1, tracking: false, spawnTick: sim.tick, endTick: sim.tick + 1,
+      hp: 0, converge: null, damage: s1.def.secondary.damage,
+    };
+    sim.missiles.push(torp);
+    const shieldBefore = s2.shield;
+    // mirrors what combat/projectiles.ts now does when a shot depletes a torpedo's hp.
+    endMissile(sim, torp, 'torpedo', torp.pos, true);
+    const evs = sim.drainEvents();
+    expect(evs.some((e) => e.t === 'splash' && e.weapon === 'torpedo')).toBe(true);
+    expect(s2.shield).toBeLessThan(shieldBefore);
+    expect(s1.shield).toBe(s1.maxShield); // the torpedo's own owner is excluded from its blast
   });
 });
 
