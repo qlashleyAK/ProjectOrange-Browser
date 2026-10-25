@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  CLASSES, CLASS_LIST, KILLS_TO_WIN, MAX_POWER, nextTierUnits, PRIMARY_TABLE,
+  arenaInfo, CLASSES, CLASS_LIST, KILLS_TO_WIN, MAX_POWER, nextTierUnits, PRIMARY_TABLE,
   type ClassId, type GameEvent, type RosterEntry,
 } from '@orange/shared';
 import { settings } from '../settings';
@@ -637,7 +637,7 @@ export class Hud {
     const p = (r: RosterEntry | undefined, cls: string) => r ? `<div class="${cls}"><div style="color:${accentCss(r.accent)};font-weight:800">${esc(r.name)}</div><div>${r.kills} kills</div></div>` : '';
     const acc = mine && mine.shotsFired > 0 ? Math.round((mine.shotsHit / mine.shotsFired) * 100) : 0;
     const html = `<div class="panel postmatch"><h1>${winner ? `${esc(winner.name.toUpperCase())} WINS` : 'MATCH OVER'}</h1>
-      <div class="sub">Next match in ${Math.ceil(f.match.timeLeft)} s</div>
+      <div class="sub">Next match${f.match.nextArena ? ` on <b>${esc(arenaInfo(f.match.nextArena).name)}</b>` : ''} in ${Math.ceil(f.match.timeLeft)} s</div>
       <div class="podium">${p(rows[1], 'p2')}${p(rows[0], 'p1')}${p(rows[2], 'p3')}</div>
       ${mine ? `<div class="sub">You: ${mine.kills} K · ${mine.deaths} D · ${mine.assists} A · ${mine.damage} damage · ${acc}% accuracy · ${mine.oranges} oranges · peak power ${mine.peakPower}</div>` : ''}
       <table><tr><th>#</th><th>Pilot</th><th>Ship</th><th>K</th><th>D</th><th>A</th><th>Damage</th></tr>

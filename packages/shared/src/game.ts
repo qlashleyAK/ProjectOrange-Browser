@@ -35,18 +35,22 @@ export interface GameSimOptions {
   offline?: boolean;
   botSkill?: BotSkill;
   arena?: ArenaData;
+  /** the map to load once a match's results have been shown; without it every match replays the same one */
+  nextArena?: (current: ArenaData) => ArenaData;
 }
 
 export const ACCENT_COUNT = 10;
 
 export class GameSim {
-  readonly world: RAPIER.World;
-  readonly arena: ArenaData;
-  readonly nav: NavGraph;
+  // the arena and everything built from it change between matches when maps rotate
+  world!: RAPIER.World;
+  arena!: ArenaData;
+  nav!: NavGraph;
+  movers!: MoverBody[];
   readonly rng: Rng;
   readonly warmupSeconds: number;
   readonly eventQueue: RAPIER.EventQueue;
-  readonly movers: MoverBody[];
+  private readonly nextArena?: (current: ArenaData) => ArenaData;
   botSkill: BotSkill;
   tick = 0;
   ships = new Map<number, Ship>();
@@ -71,16 +75,39 @@ export class GameSim {
     this.rng = new Rng(opts.seed ?? 12345);
     this.warmupSeconds = opts.offline ? WARMUP_OFFLINE_S : WARMUP_S;
     this.botSkill = opts.botSkill ?? 'normal';
-    this.arena = opts.arena ?? generateArena(hollowdeep());
-    this.world = createWorld();
-    addArenaColliders(this.world, this.arena);
-    this.world.step(); // build broadphase for queries
-    finalizeSpawns(this.world, this.arena);
-    this.nav = new NavGraph(this.world, this.arena);
-    // after the nav graph, which routes around movers' swept volumes rather than their current poses
-    this.movers = addMovers(this.world, this.arena, this.tick);
-    if (this.movers.length) this.world.step();
+    this.nextArena = opts.nextArena;
+    this.loadArena(opts.arena ?? generateArena(hollowdeep()));
     this.eventQueue = new R.EventQueue(true);
+  }
+
+  private loadArena(arena: ArenaData): void {
+    this.arena = arena;
+    this.world = createWorld();
+    addArenaColliders(this.world, arena);
+    this.world.step(); // build broadphase for queries
+    finalizeSpawns(this.world, arena);
+    this.nav = new NavGraph(this.world, arena);
+    // after the nav graph, which routes around movers' swept volumes rather than their current poses
+    this.movers = addMovers(this.world, arena, this.tick);
+    if (this.movers.length) this.world.step();
+  }
+
+  /** The map the next match will be played on. */
+  upcomingArena(): ArenaData { return this.nextArena ? this.nextArena(this.arena) : this.arena; }
+
+  /** Between matches: move to the next map. Everyone leaves the old world here; resetRound spawns them into the new one. */
+  rotateArena(): void {
+    const next = this.upcomingArena();
+    if (next === this.arena) return;
+    for (const p of this.projectiles.slice()) endProjectile(this, p, 'owner', p.pos);
+    for (const m of this.missiles.slice()) endMissile(this, m, 'owner', m.pos, false);
+    for (const s of this.shipList) if (s.alive) this.despawn(s);
+    this.colliderShip.clear();
+    this.world.free();
+    this.loadArena(next);
+    this.lastOrangeRegion = '';
+    // brains hold routes and memories of the old map
+    for (const id of this.bots.keys()) this.bots.set(id, new BotBrain(id, this.botSkill, this.rng.int(1, 1e9)));
   }
 
   // ---------------------------------------------------------------- utility

@@ -58,6 +58,7 @@ export function updateMatch(sim: GameSim): void {
     }
     case 'postMatch':
       if (sim.tick >= m.phaseEndTick) {
+        sim.rotateArena();
         sim.resetRound();
         setPhase(sim, n >= 2 ? 'warmup' : 'waiting', sim.warmupSeconds);
       }

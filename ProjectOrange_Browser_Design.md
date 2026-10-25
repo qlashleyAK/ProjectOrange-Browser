@@ -798,8 +798,18 @@ projection so no UVs are needed.
 ## 9. Match flow
 
 ```text
-WaitingForPlayers → Warmup (5 s; 3 s offline) → InProgress → PostMatch (12 s) → reset
+WaitingForPlayers → Warmup (5 s; 3 s offline) → InProgress → PostMatch (12 s) → next map → reset
 ```
+
+- **Map rotation:** every match is played on the next map, in registry order
+  (Hollowdeep Mine → The Gyre → Meridian Tower → Hollowdeep …). When the
+  post-match screen ends, `GameSim.rotateArena()` despawns everyone, frees the
+  physics world and builds the next map's colliders, spawns, nav graph,
+  movers and fresh bot brains; the normal round reset then respawns everyone
+  there. The post-match screen names the next map. Rooms rotate by default
+  (`GameRoom({ rotation: false })` turns it off); a bare `GameSim` only
+  rotates when given `nextArena`. The swap costs one ~150 ms tick, between
+  matches.
 
 - **Free-for-all:** first to **12 kills**, or most kills after **6 minutes**.
   Tiebreaker: fewest deaths, then most damage.
@@ -967,13 +977,16 @@ Bots make the game alive with zero players online.
 - **Bot backfill:** keep at least **6** participants **[DECISION]**; the
   arena is large. When a human joins, remove one bot at its next death,
   never mid-fight.
-- **Quickplay:** `GET /quickplay?arena=ID` returns the fullest room on that
-  map with a free slot in the best region; otherwise it creates one.
-- **Maps:** the menu's map selector (stored in settings) picks the map for
-  quick play, practice and new private rooms. A room keeps the map it was
-  created with; the welcome message names it and the client switches its
-  arena, prediction world and lights to match. The server's default map comes
-  from the `ARENA` environment variable (`hollowdeep` if unset).
+- **Quickplay:** `GET /quickplay?arena=ID` returns the fullest public room
+  with a free slot in the best region, whatever map its rotation is on;
+  otherwise it creates one whose rotation starts on `ID`.
+- **Maps:** the menu's "First map" selector (stored in settings) picks where
+  practice and new rooms start the rotation. The welcome message names the
+  room's current map, and every `match` message carries `arena` and
+  `nextArena`; whenever `arena` changes, the client switches its arena,
+  prediction world and lights and drops everything it was tracking on the
+  old map. The server's default first map comes from the `ARENA` environment
+  variable (`hollowdeep` if unset).
 - **Region choice:** on load, the client pings each region's `/ping` 3 times
   and keeps the median.
 - **Private rooms:** `/?room=CODE` joins or creates a private room. A "Copy
@@ -1295,6 +1308,13 @@ routes**. The whole arena is described by a data **blueprint** and turned
 into geometry and colliders by a generator, so it can be tweaked and later
 extended.
 
+It should feel cramped and worked: blasted rock and sprayed concrete, steel
+sets and timber, track and ore cars, lit by pale work lamps. Each room's
+identity comes from ore veins glowing in its landmark color through the rock
+and from its machinery, not from colored light. The palette stays cold
+(slate, grey timber, steel); orange is reserved (Section 14.1), so there is
+no brown dirt and no molten-metal glow.
+
 ### 15.1 Blueprint format
 
 ```ts
@@ -1336,10 +1356,13 @@ Rules:
 6. **Collision:** every slab becomes a Rapier `cuboid` collider in the
    static group. Props get cuboid, cylinder, or convex-hull colliders.
 7. **Rendering:** slabs become boxes with world-space triplanar materials,
-   merged per room/tunnel per material. Rock-themed surfaces are subdivided
-   to about 3 m and **displaced only away from the interior** (into the
-   wall, 0–3 m deep), so visuals never intrude into flyable space beyond
-   the collider.
+   merged per room/tunnel per material. Rock and mine surfaces are
+   subdivided to about 3 m and **displaced only away from the interior**
+   (into the wall), so visuals never intrude into flyable space beyond the
+   collider. Depth by theme and face: rock 3 m everywhere; mine walls 2.6,
+   ceilings 2; cave walls 3.2, ceilings 1.2 (stalactite roots stay buried);
+   drift walls 1.6, ceilings 1.2; works walls 1.1, ceilings 1.6; sewer 0.6.
+   Mine floors stay flat.
    - **Visual-only detail** (pipes, cables, greebles) may protrude at most
      1 m into the interior. Anything larger needs its own collider.
 8. **Validation** (unit test, run at generation):
@@ -1358,12 +1381,31 @@ The arena's overall extent is about 540 × 300 × 540 m.
 
 | ID | Name | Center (x, y, z) | Interior size (x, y, z) | Landmark | Theme |
 |---|---|---|---|---|---|
-| hub | **The Crucible** | (0, 0, 0) | 140 × 90 × 140 | white `#E8F0FF` | refinery metal + rock |
-| foundry | **Foundry** | (0, 0, −220) | 110 × 60 × 90 | magenta `#FF3FA0` | heavy industrial metal |
-| dock | **Docking Bay** | (0, −10, 220) | 150 × 50 × 80 | blue `#3F8CFF` | clean hangar metal |
-| reactor | **Reactor Shaft** | (220, 0, 0) | 70 × 220 × 70 | green `#4CFF7A` | tall cylindrical-feel metal |
-| gallery | **Crystal Gallery** | (−220, 10, 0) | 120 × 70 × 120 | violet `#9A6BFF` | raw rock cave |
-| crusher | **Ore Crusher** | (0, 150, 0) | 100 × 50 × 100 | teal `#2FE0D0` | worn machinery |
+| hub | **The Crucible** | (0, 0, 0) | 140 × 90 × 140 | white `#E8F0FF` | `mine`: blasted rock, gravel floor |
+| foundry | **Foundry** | (0, 0, −220) | 110 × 60 × 90 | magenta `#FF3FA0` | `works`: shotcrete, stained concrete floor, rock roof |
+| dock | **Docking Bay** | (0, −10, 220) | 150 × 50 × 80 | blue `#3F8CFF` | `works` |
+| reactor | **Reactor Shaft** | (220, 0, 0) | 70 × 220 × 70 | green `#4CFF7A` | `mine` |
+| gallery | **Crystal Gallery** | (−220, 10, 0) | 120 × 70 × 120 | violet `#9A6BFF` | `cave`: darker rock, strong veins |
+| crusher | **Ore Crusher** | (0, 150, 0) | 100 × 50 × 100 | teal `#2FE0D0` | `works` |
+
+Surfaces (client `arena/materials.ts`):
+
+- **Mine rock:** a jittered 3D lattice of flat facets, each at its own tilt,
+  shades like blasted rock. The facets' slope goes into the normal directly,
+  because a derivative bump draws their edges as dotted seams. Joints open
+  along only some facet edges. Broad tone, strata, grit and seepage streaks
+  sit on top.
+- **Ore veins:** two sets of wandering planar seams in patches, pinching and
+  swelling, drawn at a constant width in meters through the noise slope.
+  They glow in the room's landmark color, hottest in pockets. Strength is
+  1 in mine rooms, 1.6 in the cave and 0.5 in drifts (pale blue).
+- **Shotcrete:** soft lumps, rebound speckle, damp patches and drips.
+- **Timber:** grey, with grain along the member's long axis.
+- **Grate:** flat-bar grating; it can glow from below.
+- **Steel:** seamless worn steel, used instead of the paneled metals for
+  every steel prop in mine rooms.
+
+Each room's light uses a pale tint of its landmark (`Room.light`).
 
 ### 15.4 Tunnels and shafts
 
@@ -1400,66 +1442,98 @@ Route check (≥ 3 routes per pair), for example:
 Positions are relative to the room center unless stated. Keep 20 m clear in
 front of every doorway, and keep every passage at least 20 m wide.
 
-**The Crucible (hub)**
+The worked rooms (hub, foundry, dock, crusher) have steel sets framing their
+walls (`wallFrame`) and caged work lamps hung from the roof. Every side-wall
+doorway sits in a dark steel portal 1.8 m deep, outside the landmark frame. Ore (`material: 'ore'`) is
+mine rock with veins in the room's landmark color. The prop-placement
+stream is separate from the dressing stream, so adding detail never moves
+cover.
 
-- A central refinery column: cylinder r 9, floor to ceiling, with a glowing
-  white band at y 0.
-- Two catwalk rings around it at y −15 and y +20: octagons of radius 24
-  built from box segments 18 × 1.5 × 4, with 2 of the 8 segments missing on
-  each ring (fly-through gaps).
-- 4 radial spokes per ring (box 15 × 1.5 × 3) connecting ring to column.
-- 10 floating ore chunks (rock props, r 4–8, convex-hull colliders) at
-  seeded positions outside the tunnel approach lanes.
-- Shaft mouths S1/S2 in the ceiling have glowing teal rims.
-- The Sewer opening in the floor has a hazard-stripe frame (yellow-green
-  `#C8FF3A` and black; not orange).
+**The Crucible (hub):** the smelter cavern.
 
-**Foundry**
+- An arc-furnace stack: a ribbed, banded dark-steel cylinder r 9, floor to
+  ceiling, on a concrete plinth r 14 with a hazard rim. Tap holes glow white
+  at its foot, a white band sits at y 0, and a braced collar is at y 36.
+- Two octagonal grating catwalks at y −15 and y +20 (radius 24, segments
+  18 × 1.5 × 4, two missing on each for fly-through gaps), with railings,
+  hung from the roof on rods, plus four grating spokes each to the stack.
+- 10 **ore skips** (steel buckets of glowing ore, r 4–8) hung on hoist ropes
+  at seeded positions outside the door lanes. No rope runs up a shaft mouth:
+  a skip whose rope would is slid sideways until it clears.
+- Roof girders either side of the shaft mouths, spoil heaps in two corners,
+  and an ore car on a short spur of track behind a hazard bumper.
+- Shaft mouths S1/S2 have glowing teal rims; the Sewer opening in the floor
+  has a hazard-stripe frame (yellow-green `#C8FF3A` and black; not orange).
 
-- 6 smelter blocks (14 × 24 × 14) standing on the floor at
-  x ∈ {−30, 0, 30}, z ∈ {−20, +15}.
-- Two crane girders spanning the room's width (110 × 3 × 3) at y +24,
-  z −20 and +20.
-- A hanging crucible under each girder (cylinder r 4, h 8, at y +16).
-- Magenta glowing slag channels flush with the floor (emissive, no collider).
-- Steam vents: particles, cosmetic.
+**Foundry:** presses and ladles in a shotcrete hall.
 
-**Docking Bay**
+- 6 presses at x ∈ {−30, 0, 30}, z ∈ {−20, +15}: a bed 14 × 6 × 14, four
+  columns, a crown at +22 with twin cylinders, and a ram over a die glowing
+  magenta.
+- Two I-beam crane runways (110 m) at y +24, z ±20, each with a ladle of
+  glowing alloy below it, and a crane bridge with a hoist block.
+- Process pipes with flanges along the back wall, cabinets with indicator
+  lights beside the door, stacked slabs, magenta-lit floor grates and painted
+  walkway lines.
 
-- 3 derelict cargo hulls (rounded boxes 14 × 12 × 40, long axis z) resting
-  on the floor at x ∈ {−45, 0, 45}, z +15.
-- An overhead gantry (150 × 2 × 4) at y +20, z −20.
-- Landing-pad light grids on the floor.
-- A huge sealed bay door on the far (+z) wall, with blue running lights and
-  a starfield visible through narrow viewport slits. Visual only: the slits
-  are glass with no gap.
+**Docking Bay:** loaded ore cars waiting at the space door.
+
+- 3 tracks on sleepers at x ∈ {−45, 0, 45} with hazard bumpers. Each holds
+  a painted ore car (14 × 10 × 38, rounded) with ribs, wheels and a heaped
+  load of glowing ore. The left track stops short of the Sewer drain.
+- Two gantry beams across the room at y +20 (z −20, +26), and a trolley
+  carrying a container on the hook.
+- The bay door on the far (+z) wall: a ribbed 90 × 45 blast door in a hazard
+  frame with blue running lights. Three framed viewport slits (70 × 1.6) in
+  it show the starfield. Visual only: the slits are glass with no gap.
+- Crate stacks in the corners and a lit control booth braced off the back
+  wall.
 
 **Reactor Shaft**
 
-- A reactor core cylinder r 12, full height, with green emissive bands every
-  30 m and a pulsing glow.
-- 8 maintenance platforms (18 × 2 × 10) attached to the core at radius 20,
-  from y −90 to +90 in ~25 m steps, rotating 45° per step.
-- **Skip any platform** that would sit within 20 m of a doorway at a similar
-  height (T3 at y 0 on the west face, T9 at y 90 on the west face, T5 at
-  y 60 on the north face, T6 at y −60 on the south face).
+- The core: a ribbed dark-steel cylinder r 12, full height. The client adds
+  pulsing green bands every 30 m from y −90; plain steel bands sit between
+  them.
+- 8 railed grating landings (18 × 2 × 10) at radius 20, from y −90 to +90,
+  rotating 45° per step, each braced to the core.
+- **Skip any landing** that would reach into a doorway's 20 m lane (T3 at
+  y 0 and T9 at y 90 on the west face, T5 at y 60 on the north face, T6 at
+  y −60 on the south face).
+- Shaft sets: a steel frame round the walls every 20 m, broken at doors.
+  Corner posts run full height, with a ladder, a cable tray, wall lamps, a
+  green-lit floor grate and a head-frame ring under the roof.
 
-**Crystal Gallery**
+**Crystal Gallery:** a natural cave with a miners' scaffold.
 
-- A raw-rock cave: wall surfaces use displaced rock.
-- 6 rock pillars (convex hulls, r 8–12) running floor to ceiling, outside
-  the doorway lanes.
-- A central **geode**: a rock core r 10 with 7 emissive violet crystals
+- A raw-rock cave: darker rock, strong violet veins, deep displacement.
+- 6 vein-shot rock pillars (convex hulls, r 8–12), floor to ceiling,
+  outside the doorway lanes.
+- A central **geode**: an ore core r 10 with 7 emissive violet crystals
   (elongated octahedra, 20–30 m long) radiating outward.
-- Smaller crystal clusters on the walls (visual, ≤ 1 m protrusion).
+- 18 stalactites and 10 stalagmites (`kind: 'spike'`, irregular convex
+  cones with colliders). Their roots are buried 0.35 × length into the rock.
+  They keep clear of lanes, pillars, crystals and the geode.
+- A three-level railed timber scaffold with stairs against the back wall,
+  wherever the pillars leave room.
+- Lantern strings slung between neighboring pillars, and floor rubble.
+- Small wall crystals, sunk into the displaced rock (≤ 1 m protrusion).
 
 **Ore Crusher**
 
-- Two giant roller drums (cylinders r 10, length 60, along x) at y −15
-  (just off the floor), z ±30.
-- Conveyor belts (boxes 8 × 2 × 40) feeding them.
-- Ore piles (low rock mounds on the floor, convex hulls).
-- Teal warning lights.
+- Two toothed rolls (cylinders r 10, 58 m long, along x) at y −15 and
+  z ±30, in bearing housings.
+- A feed hopper hung from the roof, filled by an inclined belt carrying ore,
+  and two discharge belts between the rolls.
+- Four glowing ore heaps with rubble in the corners, and pulsing teal
+  warning lights.
+
+**Drifts (tunnels):** client dressing.
+
+- Timber sets every ~12 m (posts, a cap and knee braces). Raises get a
+  sill, and every other set has a caged lamp.
+- Level drifts get sleepers and steel rails, plus a flanged service pipe
+  and a cable sagging between sets.
+- Drift rock has faint pale-blue veins.
 
 ### 15.6 Navigation aids, spawns, and orange regions
 
@@ -1469,7 +1543,9 @@ front of every doorway, and keep every passage at least 20 m wide.
   color**, plus a sign above it with the destination name (canvas-texture
   text, emissive).
 - Every tunnel has a lighter "floor" stripe and running lights on its floor
-  edges, so players keep their orientation.
+  edges, so players keep their orientation. The exception is mine drifts,
+  where the track, sleepers and lamps on the timber sets already mark the
+  floor. The Sewer also gets dim hazard strips along its ceiling corners.
 - At elbows, chevrons point toward each destination.
 
 **Spawn points:** 3 per room (18 total).
@@ -1500,10 +1576,11 @@ small generated impulse responses):
 - **Gallery:** cave drip + crystal chime.
 - **Crusher:** grinding machinery.
 
-Tunnels use a short tight reverb. Other maps pick the ambience by room theme
-(refinery → Crucible, industrial → Foundry, hangar → Dock, reactor → Reactor,
-rock → Gallery, machinery → Crusher, office → Crucible, garage → Gallery,
-shaft → tunnel). The rooftop gets its own **wind** loop (gusting band-passed
+Tunnels use a short tight reverb. A room can name its ambience
+(`Room.ambience`, as all six Hollowdeep rooms do); otherwise it is picked by
+theme (mine/refinery/office → Crucible, works/industrial → Foundry,
+hangar → Dock, reactor → Reactor, cave/rock/garage → Gallery,
+machinery → Crusher, tunnel/sewer/drift/shaft → tunnel). The rooftop gets its own **wind** loop (gusting band-passed
 howl over a low rumble) with an open, nearly dry reverb.
 
 ### 15.8 Second map: "The Gyre" (`shared/arena/gyre.ts`)
@@ -1811,8 +1888,14 @@ All headless with Vitest unless noted.
   - no duplicate kills or pickups;
   - remote interpolation never shows teleports except on discontinuities;
   - a cloaked ship beyond 60 m never appears in another client's snapshots.
+- **Map rotation:** finishing a match moves every ship into the next map's
+  world, inside its bounds, and play continues; without `nextArena` the sim
+  stays put; a room's `match` messages name the current and next maps and
+  switch both after post-match.
 - **Soak:** a nightly headless 30-minute match with 8 bots — no crashes, no
   unbounded entity counts, no stuck warnings.
+  `scripts/soak.ts <min> <skill> rotation` plays through the whole rotation
+  instead of one map.
 - **Manual playtest checklist per milestone:**
   - KBM and gamepad feel;
   - all 4 classes;

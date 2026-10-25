@@ -23,3 +23,10 @@ export function arenaById(id: string): ArenaData {
   if (!a) { a = generateArena(info.blueprint()); cache.set(info.id, a); }
   return a;
 }
+
+/** Matches rotate through the maps in ARENAS order, wrapping around. */
+export function nextArenaId(id: string): string {
+  const i = ARENAS.findIndex((a) => a.id === id);
+  return ARENAS[(i + 1) % ARENAS.length]!.id;
+}
+export function nextInRotation(a: ArenaData): ArenaData { return arenaById(nextArenaId(a.blueprint.id)); }

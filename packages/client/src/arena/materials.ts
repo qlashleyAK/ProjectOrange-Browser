@@ -26,6 +26,35 @@ float pa_stripe(float t) {
   vec2 i = floor(e) * 0.5 + max(fract(e) - 0.5, 0.0);
   return clamp((i.y - i.x) / fw, 0.0, 1.0);
 }
+// coverage of a line w meters wide along the 0.5 contour of n: measured through n's slope so its width
+// holds even where n is flat, never thinner than a pixel (dimmed to match instead)
+float pa_contour(float n, float w, float pxw) {
+  float wpx = 0.5 * w / pxw;
+  float d = abs(n - 0.5) / max(fwidth(n), 1e-5);
+  return clamp(max(wpx, 0.5) + 0.5 - d, 0.0, 1.0) * min(1.0, wpx * 2.0);
+}
+// blasted rock faces: each cell of a jittered lattice is a flat facet at its own tilt (the facet's slope, out in tilt).
+// Returns (facet height in cell units, facet tone, F2 - F1 which runs to zero along the joints between facets).
+vec3 pa_facets(vec3 p, out vec3 tilt) {
+  vec3 i = floor(p), f = fract(p);
+  float d1 = 8.0, d2 = 8.0; vec3 id = i, rr = vec3(0.0);
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 g = vec3(float(x), float(y), float(z));
+    vec3 r = g + vec3(pa_hash(i + g), pa_hash(i + g + 17.3), pa_hash(i + g + 41.7)) * 0.8 + 0.1 - f;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; id = i + g; rr = r; } else if (d < d2) d2 = d;
+  }
+  tilt = vec3(pa_hash(id + 3.1), pa_hash(id + 7.9), pa_hash(id + 12.4)) - 0.5;
+  return vec3(dot(-rr, tilt), pa_hash(id + 23.0), sqrt(d2) - sqrt(d1));
+}
+// view-space normal tilted by the screen-space slope of a height field in meters (Mikkelsen's bump)
+vec3 pa_bump(vec3 pos, vec3 n, float h) {
+  vec3 sx = dFdx(pos), sy = dFdy(pos);
+  vec3 r1 = cross(sy, n), r2 = cross(n, sx);
+  float det = dot(sx, r1);
+  vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+  return normalize(abs(det) * n - grad);
+}
 `;
 
 /**
@@ -45,7 +74,10 @@ float pa_stars(vec2 p, float px, float density, float rad) {
 }
 `;
 
-export type ArenaSurface = 'metal' | 'rock' | 'hazard' | 'concrete' | 'plaster' | 'carpet' | 'tiles' | 'membrane' | 'fabric';
+export type ArenaSurface =
+  | 'metal' | 'rock' | 'hazard' | 'concrete' | 'plaster' | 'carpet' | 'tiles' | 'membrane' | 'fabric'
+  | 'minerock' | 'dirt' | 'shotcrete' | 'timber' | 'grate' | 'steel';
+type GrainAxis = 'x' | 'y' | 'z';
 
 export interface ArenaMatOpts {
   name: string; color: number; surface: ArenaSurface; metal?: number; rough?: number; panel?: number; emissive?: number; emissiveIntensity?: number;
@@ -53,11 +85,131 @@ export interface ArenaMatOpts {
   objectSpace?: boolean;
   /** concrete only: dark oil stains on upward faces */
   stains?: boolean;
+  /** minerock only: ore veins glowing in `accent`, at this strength */
+  veins?: number;
+  /** grate only: light from below glowing through the gaps in `accent` */
+  glow?: boolean;
+  accent?: number;
+  /** scale of the surface's procedural bump (0 = flat shading from the geometry alone) */
+  bump?: number;
+  /** timber only: the world axis the grain runs along */
+  grain?: GrainAxis;
 }
 
-/** Per-surface detail, modulating `diffuseColor` and setting `detail` (roughness wobble). */
+const GRAIN: Record<GrainAxis, string> = {
+  x: 'vec3(vWPos.x * 0.12, vWPos.y * 4.0, vWPos.z * 4.0)',
+  y: 'vec3(vWPos.x * 4.0, vWPos.y * 0.12, vWPos.z * 4.0)',
+  z: 'vec3(vWPos.x * 4.0, vWPos.y * 4.0, vWPos.z * 0.12)',
+};
+
+/** Per-surface detail, modulating `diffuseColor` and setting `detail` (roughness wobble) and `height` (bump). */
 function surfaceGlsl(o: ArenaMatOpts, panel: string): string {
   switch (o.surface) {
+    case 'minerock': return `
+      // blasted rock: tilted facets with dark joints between them, broad tone, strata, grit, seepage down the walls
+      float n1 = pa_fbmAA(vWPos * 0.07, pxw * 0.07);
+      float n2 = pa_fbmAA(vWPos * 0.45 + 7.0, pxw * 0.45);
+      float n3 = pa_noiseAA(vWPos * 2.3 + 3.0, pxw * 2.3);
+      const float CELL = 3.4;
+      vec3 fw3 = vec3(pa_noise(vWPos * 0.21 + 1.0), pa_noise(vWPos * 0.21 + 6.0), pa_noise(vWPos * 0.21 + 11.0)) - 0.5;
+      vec3 tilt;
+      vec3 fc = pa_facets(vWPos / CELL + fw3 * 1.1, tilt);
+      float sharp = 1.0 - smoothstep(0.03, 0.12, pxw / CELL);
+      // only some facet edges open into joints
+      float joint = (1.0 - smoothstep(0.0, max(0.08, pxw * 1.5), fc.z * CELL * 0.5)) * sharp
+        * smoothstep(0.58, 0.8, pa_noise(vWPos * 0.09 + 50.0));
+      float sy = vWPos.y * 0.16 + dot(vWPos.xz, vec2(0.05, 0.03)) + n1 * 2.5;
+      float sfw = fwidth(sy);
+      float strata = mix(0.5 + 0.5 * sin(sy * 6.2832), 0.5, smoothstep(0.15, 0.5, sfw));
+      float band = mix(pa_hash(vec3(floor(sy), 1.0, 2.0)), 0.5, smoothstep(0.1, 0.4, sfw));
+      diffuseColor.rgb *= 0.5 + 0.8 * n1;
+      diffuseColor.rgb *= mix(1.0, 0.86 + 0.26 * fc.y, sharp);
+      diffuseColor.rgb *= 0.86 + 0.24 * n2;
+      diffuseColor.rgb *= 0.9 + 0.16 * n3;
+      diffuseColor.rgb *= 0.9 + 0.12 * strata + 0.2 * (band - 0.5);
+      diffuseColor.rgb *= 1.0 - joint * 0.55;
+      float wet = smoothstep(0.58, 0.78, pa_fbm(vec3(vWPos.x * 0.22, vWPos.y * 0.018, vWPos.z * 0.22) + 5.0)) * (1.0 - dom.y);
+      diffuseColor.rgb *= 1.0 - wet * 0.35;
+      detail = n2 * 0.6 + fc.y * 0.3 - wet * 1.6 - joint * 0.3;
+      // facets step at their edges, which a derivative bump would draw as dotted seams; their slope goes in whole
+      slope = tilt * 0.55 * sharp;
+      height = (n2 - 0.5) * 0.25 + n3 * 0.05 - joint * 0.06;
+      ${o.veins ? `
+      // ore veins: two sets of jagged, wandering planar seams in patches, pinching and swelling, glowing hottest in pockets.
+      // 0.5 + 0.5 * (triangle wave) only touches 0.5 at its troughs, so each period holds one seam
+      vec3 vw = vec3(pa_noise(vWPos * 0.09 + 3.0), pa_noise(vWPos * 0.09 + 8.0), pa_noise(vWPos * 0.09 + 13.0)) - 0.5;
+      vec3 vq = vWPos + vw * 5.0 + (pa_noise(vWPos * 0.4 + 21.0) - 0.5) * 0.9;
+      float t1 = abs(fract(dot(vq, vec3(0.62, 0.55, 0.56)) / 16.0) - 0.5) * 2.0;
+      float t2 = abs(fract(dot(vq, vec3(-0.45, 0.4, 0.8)) / 7.0) - 0.5) * 2.0;
+      float swell = 0.3 + 1.3 * pa_noise(vWPos * 0.15 + 2.0);
+      float seam = pa_contour(0.5 + 0.5 * t1, 0.4 * swell, pxw) * smoothstep(0.42, 0.6, pa_noise(vWPos * 0.035 + 17.0));
+      float stringer = pa_contour(0.5 + 0.5 * t2, 0.12 * swell, pxw) * smoothstep(0.55, 0.7, pa_noise(vWPos * 0.07 + 29.0));
+      float vein = max(seam, stringer * 0.8);
+      float hot = smoothstep(0.6, 0.85, pa_noise(vWPos * 0.08 + 5.0));
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.3, vein);
+      totalEmissiveRadiance += pa_accent * vein * (0.15 + 1.6 * hot * hot);
+      detail -= vein * 1.5;
+      height -= vein * 0.05;` : ''}`;
+    case 'dirt': return `
+      // slate gravel: lumps, coarse and fine grit, puddles in the low spots inside a damp rim
+      float big = pa_fbm(vWPos * 0.045);
+      float mid = pa_fbmAA(vWPos * 0.4, pxw * 0.4);
+      float g1 = pa_noiseAA(vWPos * 2.2, pxw * 2.2);
+      float g2 = pa_noiseAA(vWPos * 5.3 + 4.0, pxw * 5.3);
+      float low = pa_fbm(vWPos * 0.05 + 9.0) - mid * 0.06;
+      float pud = smoothstep(0.68, 0.71, low) * dom.y;
+      float damp = smoothstep(0.56, 0.68, low) * dom.y * (1.0 - pud);
+      diffuseColor.rgb *= 0.62 + 0.55 * big;
+      diffuseColor.rgb *= 0.84 + 0.26 * mid;
+      diffuseColor.rgb *= 0.82 + 0.18 * g1 + 0.16 * smoothstep(0.55, 0.8, g2);
+      diffuseColor.rgb *= 1.0 - damp * 0.3;
+      diffuseColor.rgb *= 1.0 - pud * 0.45;
+      detail = mid - damp - pud * 3.0;
+      height = ((mid - 0.5) * 0.3 + g1 * 0.05 + g2 * 0.03) * (1.0 - pud);`;
+    case 'shotcrete': return `
+      // sprayed concrete over rock: soft lumps, rebound speckle, damp patches and drips, no seams
+      float big = pa_fbm(vWPos * 0.05);
+      float mid = pa_fbmAA(vWPos * 0.38, pxw * 0.38);
+      float fine = pa_noiseAA(vWPos * 3.4, pxw * 3.4);
+      float damp = smoothstep(0.55, 0.8, pa_fbm(vec3(vWPos.x * 0.09, vWPos.y * 0.025, vWPos.z * 0.09) + 13.0)) * (1.0 - dom.y);
+      float drip = smoothstep(0.62, 0.85, pa_noiseAA(vec3(vWPos.x * 0.9, vWPos.y * 0.04, vWPos.z * 0.9), pxw * 0.9)) * (1.0 - dom.y);
+      diffuseColor.rgb *= 0.6 + 0.55 * big;
+      diffuseColor.rgb *= 0.8 + 0.32 * mid;
+      diffuseColor.rgb *= 0.9 + 0.16 * fine;
+      diffuseColor.rgb *= 1.0 - damp * 0.4 - drip * 0.25;
+      detail = mid - damp * 1.2;
+      height = (mid - 0.5) * 0.7 + (big - 0.5) * 1.2 + fine * 0.04;`;
+    case 'steel': return `
+      // seamless worn steel: mottled paint, grime streaking down the sides, scuffed speckle
+      float m1 = pa_fbmAA(vWPos * 0.3, pxw * 0.3);
+      float streak = pa_noiseAA(vec3(vWPos.x * 1.6, vWPos.y * 0.07, vWPos.z * 1.6), pxw * 1.6);
+      float speck = pa_noiseAA(vWPos * 5.5 + 2.0, pxw * 5.5);
+      diffuseColor.rgb *= 0.78 + 0.34 * m1;
+      diffuseColor.rgb *= 1.0 - smoothstep(0.55, 0.9, streak) * 0.35 * (1.0 - dom.y);
+      diffuseColor.rgb *= 0.94 + 0.1 * speck;
+      detail = m1 * 0.6 + streak * 0.3 + speck * 0.2;
+      height = (m1 - 0.5) * 0.03 + speck * 0.01;`;
+    case 'timber': return `
+      // weathered grey timber: grain and drying checks along the member, grime in patches
+      vec3 gq = ${GRAIN[o.grain ?? 'y']};
+      float grain = pa_noiseAA(gq, pxw * 4.0);
+      float grain2 = pa_noiseAA(gq * vec3(2.0, 2.3, 2.3) + 5.0, pxw * 9.0);
+      float chk = abs(pa_noise(gq * 0.45 + 9.0) - 0.5);
+      float kfw = fwidth(chk) + 1e-4;
+      float check = (1.0 - smoothstep(0.02, 0.02 + kfw * 1.5, chk)) * (1.0 - smoothstep(0.03, 0.1, kfw));
+      diffuseColor.rgb *= 0.78 + 0.3 * grain;
+      diffuseColor.rgb *= 0.92 + 0.12 * grain2;
+      diffuseColor.rgb *= 1.0 - check * 0.5;
+      diffuseColor.rgb *= 0.82 + 0.3 * pa_fbm(vWPos * 0.15);
+      detail = 0.55 + grain * 0.3;
+      height = grain * 0.03 - check * 0.05;`;
+    case 'grate': return `
+      // flat-bar grating: dark gaps, averaged out far away
+      vec2 gpx = max(fwidth(puv), vec2(1e-4));
+      float bars = mix(pa_grid(puv, 1.1, 0.28), 0.44, smoothstep(0.12, 0.35, max(gpx.x, gpx.y) / 1.1));
+      diffuseColor.rgb *= mix(0.07, 1.0, bars);
+      detail = 0.35 + bars * 0.3;
+      ${o.glow ? 'totalEmissiveRadiance += pa_accent * (1.0 - bars) * dom.y;' : ''}`;
     case 'rock': return `
       float n1 = pa_fbmAA(vWPos * 0.12, pxw * 0.12);
       float n2 = pa_fbmAA(vWPos * 0.9 + 7.0, pxw * 0.9);
@@ -158,12 +310,15 @@ export function arenaMaterial(o: ArenaMatOpts): THREE.MeshStandardMaterial {
   const space = o.objectSpace
     ? 'vWPos = position;\nvWNormal = normalize(normal);'
     : 'vWPos = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * normal);';
+  const accented = !!(o.veins || o.glow);
+  const accent = new THREE.Color(o.accent ?? 0xffffff).multiplyScalar(o.veins ?? 1);
   mat.onBeforeCompile = (shader) => {
+    if (accented) shader.uniforms.pa_accent = { value: accent };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${space}`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\n${NOISE}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\n${accented ? 'uniform vec3 pa_accent;\n' : ''}${NOISE}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 an = abs(vWNormal); vec3 tw = an / (an.x + an.y + an.z);
         vec3 dom = step(vec3(max(max(an.x, an.y), an.z)), an);
@@ -171,13 +326,24 @@ export function arenaMaterial(o: ArenaMatOpts): THREE.MeshStandardMaterial {
         vec3 fwp = fwidth(vWPos);
         float pxw = max(max(fwp.x, fwp.y), fwp.z);
         float detail = 0.0;
+        float height = 0.0;
+        vec3 slope = vec3(0.0);
         ${surfaceGlsl(o, panel)}
       `)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = clamp(roughnessFactor + (detail - 0.5) * 0.3, 0.05, 1.0);
       `);
+    if (o.bump) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        normal = pa_bump(-vViewPosition, normal, height * ${o.bump.toFixed(2)});
+        vec3 vslope = (viewMatrix * vec4(slope, 0.0)).xyz;
+        normal = normalize(normal - (vslope - normal * dot(vslope, normal)) * ${o.bump.toFixed(2)});
+      `);
+    }
   };
-  mat.customProgramCacheKey = () => `arena-${o.surface}-${panel}${o.objectSpace ? '-obj' : ''}${o.stains ? '-stains' : ''}`;
+  // the accent is a uniform, so every accent shares one program
+  mat.customProgramCacheKey = () => `arena-${o.surface}-${panel}${o.objectSpace ? '-obj' : ''}${o.stains ? '-stains' : ''}`
+    + `${o.veins ? '-veins' : ''}${o.glow ? '-glow' : ''}${o.bump ? `-b${o.bump}` : ''}${o.grain ? `-g${o.grain}` : ''}`;
   return mat;
 }
 
@@ -247,8 +413,14 @@ export function glowMaterial(color: number, intensity: number, name = 'glow'): T
   return new THREE.MeshBasicMaterial({ name, color: new THREE.Color(color).multiplyScalar(intensity) });
 }
 
-type SurfaceSpec = { color: number; surface: ArenaSurface; panel: number; metal: number; rough: number; stains?: boolean };
+type SurfaceSpec = { color: number; surface: ArenaSurface; panel: number; metal: number; rough: number; stains?: boolean; veins?: number; bump?: number };
+const MINE_ROCK: SurfaceSpec = { color: 0x4d5056, surface: 'minerock', panel: 3, metal: 0.04, rough: 0.86, veins: 1, bump: 1 };
+const DIRT: SurfaceSpec = { color: 0x3f4146, surface: 'dirt', panel: 3, metal: 0.02, rough: 0.95, bump: 1 };
 const THEME_COLORS: Record<Theme, SurfaceSpec> = {
+  mine: MINE_ROCK,
+  works: { color: 0x575a5f, surface: 'shotcrete', panel: 3, metal: 0.02, rough: 0.9, bump: 1 },
+  cave: { ...MINE_ROCK, color: 0x55575f, veins: 1.6 },
+  drift: { ...MINE_ROCK, veins: 0.5 },
   refinery: { color: 0x5c626a, surface: 'metal', panel: 4, metal: 0.6, rough: 0.55 },
   industrial: { color: 0x4a4b50, surface: 'metal', panel: 3, metal: 0.65, rough: 0.6 },
   hangar: { color: 0x7e868f, surface: 'metal', panel: 5, metal: 0.5, rough: 0.45 },
@@ -256,7 +428,7 @@ const THEME_COLORS: Record<Theme, SurfaceSpec> = {
   rock: { color: 0x494c52, surface: 'rock', panel: 3, metal: 0.05, rough: 0.92 },
   machinery: { color: 0x51565a, surface: 'metal', panel: 3.5, metal: 0.6, rough: 0.65 },
   tunnel: { color: 0x4c5158, surface: 'metal', panel: 2, metal: 0.55, rough: 0.6 },
-  sewer: { color: 0x37403a, surface: 'metal', panel: 1.8, metal: 0.4, rough: 0.8 },
+  sewer: { color: 0x3d4440, surface: 'shotcrete', panel: 3, metal: 0.02, rough: 0.7, bump: 1 },
   office: { color: 0x6c7075, surface: 'plaster', panel: 4, metal: 0, rough: 0.85 },
   garage: { color: 0x66686b, surface: 'concrete', panel: 6, metal: 0.02, rough: 0.9 },
   roof: { color: 0x45474b, surface: 'membrane', panel: 4, metal: 0.02, rough: 0.9 },
@@ -273,6 +445,10 @@ const THEME_PARTS: Partial<Record<Theme, Partial<Record<WallPart, SurfaceSpec | 
   },
   garage: { floor: { color: 0x58595c, surface: 'concrete', panel: 6, metal: 0.02, rough: 0.85, stains: true } },
   roof: { wall: 'sky', ceiling: 'sky' },
+  mine: { floor: DIRT },
+  works: { floor: { color: 0x47494d, surface: 'concrete', panel: 8, metal: 0.02, rough: 0.85, stains: true }, ceiling: MINE_ROCK },
+  drift: { floor: DIRT },
+  sewer: { floor: { ...DIRT, color: 0x383d3e } },
 };
 
 export class ArenaMaterials {
@@ -284,17 +460,28 @@ export class ArenaMaterials {
     return m;
   }
 
-  /** `floorY` sets where the sky box's horizon haze starts. */
-  wall(theme: Theme, part: WallPart, floorY = 0): THREE.Material {
+  /** `floorY` sets where the sky box's horizon haze starts; `accent` colors ore veins. */
+  wall(theme: Theme, part: WallPart, floorY = 0, accent = 0xffffff): THREE.Material {
     const spec = THEME_PARTS[theme]?.[part] ?? THEME_COLORS[theme];
     if (spec === 'sky') return this.get(`sky-box-${floorY}`, () => skyBoxMaterial(floorY));
-    const key = `wall-${spec.surface}-${spec.color.toString(16)}-${spec.panel}${spec.stains ? '-s' : ''}`;
-    return this.get(key, () => arenaMaterial({ name: key, ...spec }));
+    const key = `wall-${spec.surface}-${spec.color.toString(16)}-${spec.panel}${spec.stains ? '-s' : ''}${spec.veins ? `-v${spec.veins}-${accent.toString(16)}` : ''}`;
+    return this.get(key, () => arenaMaterial({ name: key, ...spec, accent }));
   }
 
-  prop(m: PropMaterial, emissive?: number, moving = false, color?: number): THREE.Material {
+  /** `grain` is the world axis a timber member runs along. */
+  prop(m: PropMaterial, emissive?: number, moving = false, color?: number, grain: GrainAxis = 'y'): THREE.Material {
     const sp = moving ? '-obj' : '';
     switch (m) {
+      case 'timber': return this.get(`p-timber-${grain}`, () => arenaMaterial({ name: 'p-timber', color: 0x58595b, surface: 'timber', metal: 0, rough: 0.9, grain, bump: 1 }));
+      case 'grate': return this.get(`p-grate-${emissive ?? 'dark'}${sp}`, () => arenaMaterial({
+        name: 'p-grate', color: 0x5a5f66, surface: 'grate', metal: 0.7, rough: 0.5, glow: emissive !== undefined, accent: emissive, objectSpace: moving,
+      }));
+      case 'ore': {
+        const c = emissive ?? 0x9fd8ff;
+        return this.get(`p-ore-${c}${sp}`, () => arenaMaterial({
+          name: 'p-ore', color: 0x575a60, surface: 'minerock', metal: 0.05, rough: 0.85, accent: c, veins: 1.3, bump: 1, objectSpace: moving,
+        }));
+      }
       case 'metal': return this.get(`p-metal${sp}`, () => arenaMaterial({ name: 'p-metal', color: 0x6b7179, surface: 'metal', panel: 2, metal: 0.7, rough: 0.45, objectSpace: moving }));
       case 'darkMetal': return this.get(`p-dark${sp}`, () => arenaMaterial({ name: 'p-dark', color: 0x2e3238, surface: 'metal', panel: 1.5, metal: 0.75, rough: 0.5, objectSpace: moving }));
       case 'rock': return this.get(`p-rock${sp}`, () => arenaMaterial({ name: 'p-rock', color: 0x4d5056, surface: 'rock', objectSpace: moving }));
@@ -321,6 +508,13 @@ export class ArenaMaterials {
       }
       case 'sky': return this.get('p-sky', () => skyWindowMaterial());
     }
+  }
+
+  /** Seamless worn steel, standing in for the paneled metals in the mine. */
+  steel(dark = false, moving = false): THREE.Material {
+    return this.get(`p-steel${dark ? '-dark' : ''}${moving ? '-obj' : ''}`, () => arenaMaterial({
+      name: 'p-steel', color: dark ? 0x34383e : 0x6d737b, surface: 'steel', metal: dark ? 0.7 : 0.65, rough: dark ? 0.55 : 0.48, bump: 1, objectSpace: moving,
+    }));
   }
 
   glow(color: number, intensity: number): THREE.MeshBasicMaterial {

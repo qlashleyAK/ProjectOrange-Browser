@@ -53,7 +53,8 @@ describe('arena generator', () => {
 
   it('has the expected props', () => {
     const props = arena.blueprint.props;
-    expect(props.filter((p) => p.room === 'hub' && p.kind === 'rock').length).toBe(10);
+    // one hoist rope per ore skip
+    expect(props.filter((p) => p.room === 'hub' && p.kind === 'cylinder' && p.radius === 0.22).length).toBe(10);
     expect(props.filter((p) => p.room === 'gallery' && p.kind === 'pillar').length).toBe(6);
     expect(props.filter((p) => p.room === 'gallery' && p.kind === 'crystal').length).toBe(7);
   });

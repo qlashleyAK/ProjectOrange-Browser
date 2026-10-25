@@ -3,8 +3,8 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  crystalPoints, DT, getA, moverPose, pillarPoints, placeAt, q4, rockPoints, v3,
-  type ArenaData, type Axis, type Mover, type Prop, type Slab, type V3,
+  crystalPoints, DT, getA, moverPose, pillarPoints, placeAt, q4, rockPoints, spikePoints, v3,
+  type ArenaData, type Axis, type Mover, type Prop, type Slab, type Theme, type V3,
 } from '@orange/shared';
 import { ArenaMaterials } from './materials';
 
@@ -46,11 +46,25 @@ const fbm = (x: number, y: number, z: number) => vnoise(x, y, z) * 0.6 + vnoise(
 // ------------------------------------------------------------------ geometry helpers
 const AXES: [THREE.Vector3, THREE.Vector3, THREE.Vector3] = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
 
-/** Interior face quad of a slab, optionally subdivided and displaced into the wall. */
-function faceGeometry(s: Slab, displace: boolean): THREE.BufferGeometry {
+/** How far (m) a theme's faces sink into the rock behind them, by part; unlisted faces stay flat. */
+const DISPLACE: Partial<Record<Theme, { wall: number; floor?: number; ceiling: number }>> = {
+  rock: { wall: 3, floor: 3, ceiling: 3 },
+  mine: { wall: 2.6, ceiling: 2 },
+  // shallow overhead, so stalactite roots stay buried
+  cave: { wall: 3.2, ceiling: 1.2 },
+  drift: { wall: 1.6, ceiling: 1.2 },
+  works: { wall: 1.1, ceiling: 1.6 },
+  sewer: { wall: 0.6, ceiling: 0.6 },
+};
+/** Vein color in the drifts, which belong to no one room. */
+const DRIFT_VEIN = 0xa8d4ff;
+
+/** Interior face quad of a slab, optionally subdivided and displaced `depth` meters into the wall. */
+function faceGeometry(s: Slab, depth: number): THREE.BufferGeometry {
   const f = s.face;
   const ua = ((f.axis + 1) % 3) as Axis, va = ((f.axis + 2) % 3) as Axis;
   const du = f.uMax - f.uMin, dv = f.vMax - f.vMin;
+  const displace = depth > 0;
   const nu = displace ? Math.max(1, Math.round(du / 3)) : 1;
   const nv = displace ? Math.max(1, Math.round(dv / 3)) : 1;
   const pos: number[] = [];
@@ -64,7 +78,7 @@ function faceGeometry(s: Slab, displace: boolean): THREE.BufferGeometry {
       if (displace) {
         const edge = Math.min(u - f.uMin, f.uMax - u, v - f.vMin, f.vMax - v);
         const k = Math.min(1, edge / 6);
-        const d = fbm(p.x * 0.06, p.y * 0.06, p.z * 0.06) * 3 * k;
+        const d = fbm(p.x * 0.06, p.y * 0.06, p.z * 0.06) * depth * k;
         // displace away from the interior: opposite to the inward normal
         p.setComponent(f.axis, f.plane - f.normalSign * d);
       }
@@ -103,8 +117,9 @@ function propGeometry(p: Prop): THREE.BufferGeometry | null {
       break;
     case 'rock': g = convex(rockPoints(p.radius, p.seed, p.squash ?? 1)); break;
     case 'pillar': g = convex(pillarPoints(p.radius, p.height, p.seed)); break;
-    case 'crystal': {
-      g = convex(crystalPoints(p.length, p.radius));
+    case 'crystal':
+    case 'spike': {
+      g = convex(p.kind === 'crystal' ? crystalPoints(p.length, p.radius) : spikePoints(p.length, p.radius, p.seed));
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(p.dir.x, p.dir.y, p.dir.z).normalize());
       g.applyQuaternion(q);
       break;
@@ -115,6 +130,29 @@ function propGeometry(p: Prop): THREE.BufferGeometry | null {
       break;
   }
   g.translate(p.center.x, p.center.y, p.center.z);
+  return clean(g);
+}
+
+const AXIS_NAME = ['x', 'y', 'z'] as const;
+const MINE_THEMES = new Set<Theme>(['mine', 'works', 'cave']);
+
+/** World axis a box prop's grain runs along: its longest side, turned the way the box is. */
+function grainAxis(p: Prop): 'x' | 'y' | 'z' {
+  if (p.kind !== 'box') return 'y';
+  const { x, y, z } = p.size;
+  const v = x >= y && x >= z ? new THREE.Vector3(1, 0, 0) : y >= z ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+  // same order as boxRotation: Z tilt, then X, then Y
+  v.applyEuler(new THREE.Euler(p.rotX ?? 0, p.rotY ?? 0, p.rotZ ?? 0, 'YXZ'));
+  const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
+  return AXIS_NAME[a.indexOf(Math.max(...a))]!;
+}
+
+/** A box `w` thick from `a` to `b`. */
+function beamGeom(a: THREE.Vector3, b: THREE.Vector3, w: number): THREE.BufferGeometry {
+  const d = b.clone().sub(a), len = d.length();
+  const g = new THREE.BoxGeometry(len, w, w);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), d.normalize()));
+  g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
   return clean(g);
 }
 
@@ -216,10 +254,9 @@ export function buildArena(arena: ArenaData): ArenaView {
   // walls
   for (const s of arena.slabs) {
     const part = s.face.axis !== 1 ? 'wall' : s.face.normalSign > 0 ? 'floor' : 'ceiling';
-    const displace = s.theme === 'rock';
     const room = rooms.get(s.owner);
     const floorY = room ? room.center.y - room.size.y / 2 : 0;
-    addGeom(s.owner, mats.wall(s.theme, part, floorY), faceGeometry(s, displace));
+    addGeom(s.owner, mats.wall(s.theme, part, floorY, room?.landmark ?? DRIFT_VEIN), faceGeometry(s, DISPLACE[s.theme]?.[part] ?? 0));
   }
 
   // props: static ones merge per material; spinning and pulsing ones keep their own mesh
@@ -234,7 +271,9 @@ export function buildArena(arena: ArenaData): ArenaView {
       addObj(p.room, mesh);
       continue;
     }
-    const m = mats.prop(p.material, p.emissive, false, p.color);
+    const mine = MINE_THEMES.has(rooms.get(p.room)!.theme) && (p.material === 'metal' || p.material === 'darkMetal');
+    const m = mine ? mats.steel(p.material === 'darkMetal', !!p.spin)
+      : mats.prop(p.material, p.emissive, false, p.color, p.material === 'timber' ? grainAxis(p) : undefined);
     if (p.spin) {
       g.translate(-p.center.x, -p.center.y, -p.center.z);
       const mesh = new THREE.Mesh(g, m);
@@ -327,13 +366,28 @@ export function buildArena(arena: ArenaData): ArenaView {
       size.setComponent(other, d.size + bar * 2);
       addGeom(d.room.id, glow, boxAt(center, size));
     }
+    // mine rooms set a steel portal around wall doors
+    const portal = MINE_THEMES.has(d.room.theme) && d.axis !== 1 ? 1.8 : 0;
+    if (portal) {
+      const pc = new THREE.Vector3(d.center.x, d.center.y, d.center.z).addScaledVector(n, 0.8);
+      for (const [axis, sgn] of [[ua, 1], [ua, -1], [va, 1], [va, -1]] as [Axis, number][]) {
+        const other = axis === ua ? va : ua;
+        const center = pc.clone();
+        center.setComponent(axis, center.getComponent(axis) + sgn * (hs + bar + portal / 2));
+        const size = new THREE.Vector3();
+        size.setComponent(d.axis, 1.6);
+        size.setComponent(axis, portal);
+        size.setComponent(other, d.size + (bar + portal) * 2);
+        addGeom(d.room.id, mats.steel(true), boxAt(center, size));
+      }
+    }
     // sign above the door (on the face), reading the destination
     const sign = signMesh(`▸ ${dest.name}`, color, 'none', Math.min(26, d.size * 0.9));
     const up = d.axis === 1 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(up, n).normalize();
     const basis = new THREE.Matrix4().makeBasis(right, up, n);
     sign.quaternion.setFromRotationMatrix(basis);
-    sign.position.copy(new THREE.Vector3(d.center.x, d.center.y, d.center.z)).addScaledVector(up, hs + bar + 3.2).addScaledVector(n, 0.3);
+    sign.position.copy(new THREE.Vector3(d.center.x, d.center.y, d.center.z)).addScaledVector(up, hs + bar + 3.2 + portal).addScaledVector(n, 0.3);
     addObj(d.room.id, sign);
 
     // the tunnel side gets a smaller frame in the room's own color so exits are readable from inside
@@ -351,11 +405,66 @@ export function buildArena(arena: ArenaData): ArenaView {
     }
   }
 
+  // mine drifts: timber sets with knee braces, caged lamps on every other cap, a track in level drifts,
+  // and a water main and sagging cable run along the top corners
+  const lampMat = mats.glow(0xdce8ff, 3.2);
+  const cageMat = mats.steel(true);
+  const steel = mats.steel();
+  const cableMat = mats.steel(true);
+  for (const s of arena.segments) {
+    const t = s.tunnel;
+    if (t.theme !== 'drift') continue;
+    const hs = t.side / 2;
+    const along = s.axis, up: Axis = along === 1 ? 0 : 1, across = (3 - along - up) as Axis;
+    const lo = getA(s.box.min, along), len = getA(s.box.max, along) - lo;
+    const floorP = getA(s.box.min, up), ceilP = getA(s.box.max, up), mid = getA(s.box.min, across) + hs;
+    const P = (a: number, u: number, c: number) => new THREE.Vector3().setComponent(along, a).setComponent(up, u).setComponent(across, c);
+    const post = mats.prop('timber', undefined, false, undefined, AXIS_NAME[up]);
+    const cap = mats.prop('timber', undefined, false, undefined, AXIS_NAME[across]);
+    const raise = along === 1;
+    const n = Math.max(1, Math.round(len / 12)), step = len / n;
+    const sets: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = lo + step * (i + 0.5);
+      sets.push(a);
+      for (const sg of [-1, 1]) {
+        addGeom(t.id, post, boxAt(P(a, (floorP + ceilP) / 2, mid + sg * (hs - 0.8)), P(1.5, t.side, 1.5)));
+        addGeom(t.id, cap, beamGeom(P(a, ceilP - 5.6, mid + sg * (hs - 1.5)), P(a, ceilP - 1.6, mid + sg * (hs - 5.6)), 0.9));
+      }
+      addGeom(t.id, cap, boxAt(P(a, ceilP - 0.9, mid), P(1.5, 1.8, t.side)));
+      // a raise has no floor to stand the posts on, so its sets close into square frames
+      if (raise) addGeom(t.id, cap, boxAt(P(a, floorP + 0.9, mid), P(1.5, 1.8, t.side)));
+      if (i % 2 === 0) {
+        addGeom(t.id, cageMat, boxAt(P(a, ceilP - 2.2, mid), P(1.7, 0.8, 1.7)));
+        addGeom(t.id, lampMat, boxAt(P(a, ceilP - 2.95, mid), P(1.1, 0.7, 1.1)));
+      }
+    }
+    if (!raise) {
+      for (let k = 1.3; k < len - 0.6; k += 2.6) addGeom(t.id, cap, boxAt(P(lo + k, floorP + 0.2, mid), P(1.1, 0.4, 9.5)));
+      for (const sg of [-1, 1]) addGeom(t.id, steel, boxAt(P(lo + len / 2, floorP + 0.7, mid + sg * 3), P(len, 0.6, 0.5)));
+    }
+    const pipe = new THREE.CylinderGeometry(0.75, 0.75, len, 12);
+    if (along === 0) pipe.rotateZ(Math.PI / 2); else if (along === 2) pipe.rotateX(Math.PI / 2);
+    const pc = P(lo + len / 2, ceilP - 3, mid + (hs - 2.4));
+    pipe.translate(pc.x, pc.y, pc.z);
+    addGeom(t.id, steel, clean(pipe));
+    for (let k = 3; k < len - 1; k += 6) addGeom(t.id, steel, boxAt(P(lo + k, ceilP - 3, mid + (hs - 2.4)), P(0.5, 1.9, 1.9)));
+    // the cable sags between the cap ends
+    const knots = [lo, ...sets, lo + len];
+    for (let i = 0; i < knots.length - 1; i++) {
+      const a0 = knots[i]!, a1 = knots[i + 1]!;
+      const c = mid - (hs - 2.2), y0 = ceilP - 2.1, sag = raise ? 0 : 0.9;
+      const pts = [0, 0.25, 0.5, 0.75, 1].map((f) => P(a0 + (a1 - a0) * f, y0 - Math.sin(f * Math.PI) * sag, c));
+      for (let j = 0; j < 4; j++) addGeom(t.id, cableMat, beamGeom(pts[j]!, pts[j + 1]!, 0.45));
+    }
+  }
+
   // tunnel floor stripes, running lights and elbow chevrons
   const stripeMat = mats.glow(0xb8c4d0, 0.9);
   const runMat = mats.glow(0xbfe8ff, 3);
   for (const s of arena.segments) {
     const t = s.tunnel;
+    if (t.theme === 'drift') continue;
     const hs = t.side / 2;
     const floorAxis: Axis = s.axis === 1 ? 0 : 1;
     const sideAxis = (3 - s.axis - floorAxis) as Axis;
@@ -472,31 +581,16 @@ export function buildArena(arena: ArenaData): ArenaView {
   }
   const dock = rooms.get('dock');
   if (dock) {
-    const padMat = mats.glow(0x3f8cff, 2.5);
-    const floorY = dock.center.y - dock.size.y / 2 + 0.08;
-    for (const px of [-45, 0, 45]) {
-      for (let i = -3; i <= 3; i++) for (const pz of [-26, -12]) {
-        addGeom('dock', padMat, boxAt(new THREE.Vector3(dock.center.x + px + i * 3, floorY, dock.center.z + pz), new THREE.Vector3(0.5, 0.12, 0.5)));
-      }
-    }
-    // bay door slits (glass, visual only) with a starfield behind
-    const doorZ = dock.center.z + dock.size.z / 2 - 0.15;
+    // vision slits in the bay door (glass, visual only) with a starfield behind, framed in steel
+    const doorZ = dock.center.z + dock.size.z / 2 - 0.85;
     const star = starfieldMaterial();
-    for (let i = 0; i < 5; i++) {
-      const slit = new THREE.Mesh(new THREE.PlaneGeometry(90, 1.4), star);
-      slit.position.set(dock.center.x, dock.center.y - 12 + i * 6, doorZ);
+    for (const y of [-6, 0, 6]) {
+      const slit = new THREE.Mesh(new THREE.PlaneGeometry(70, 1.6), star);
+      slit.position.set(dock.center.x, dock.center.y + y, doorZ);
       slit.rotation.y = Math.PI;
       addObj('dock', slit);
+      for (const dy of [-1, 1]) addGeom('dock', mats.steel(true), boxAt(new THREE.Vector3(dock.center.x, dock.center.y + y + dy * 1.0, doorZ - 0.15), new THREE.Vector3(72, 0.4, 0.4)));
     }
-    const runL = mats.glow(0x3f8cff, 4);
-    for (let i = -7; i <= 7; i++) addGeom('dock', runL, boxAt(new THREE.Vector3(dock.center.x + i * 9, dock.center.y + 18, doorZ - 0.3), new THREE.Vector3(1.4, 0.5, 0.5)));
-  }
-  const foundry = rooms.get('foundry');
-  if (foundry) {
-    const slag = mats.glow(0xff3fa0, 2.4);
-    const fy = foundry.center.y - foundry.size.y / 2 + 0.05;
-    for (const z of [-36, 34]) addGeom('foundry', slag, boxAt(new THREE.Vector3(foundry.center.x, fy, foundry.center.z + z), new THREE.Vector3(96, 0.1, 2.2)));
-    addGeom('foundry', slag, boxAt(new THREE.Vector3(foundry.center.x - 46, fy, foundry.center.z), new THREE.Vector3(2.2, 0.1, 70)));
   }
   const reactor = rooms.get('reactor');
   if (reactor) {
@@ -506,20 +600,6 @@ export function buildArena(arena: ArenaData): ArenaView {
       animated.push({ mesh: band, kind: 'pulse', base: new THREE.Color(0x4cff7a).multiplyScalar(3), speed: 1.3 });
       addObj('reactor', band);
     }
-  }
-  const crusher = rooms.get('crusher');
-  if (crusher) {
-    const warn = mats.glow(0x2fe0d0, 4);
-    for (const [x, z] of [[-48, -48], [48, -48], [-48, 48], [48, 48]]) {
-      addGeom('crusher', warn, boxAt(new THREE.Vector3(crusher.center.x + x, crusher.center.y + 20, crusher.center.z + z), new THREE.Vector3(1.2, 1.2, 1.2)));
-    }
-  }
-  const hub = rooms.get('hub');
-  if (hub) {
-    const band = mats.glow(0xe8f0ff, 3.5);
-    const g = new THREE.CylinderGeometry(9.2, 9.2, 2.4, 36, 1, true);
-    g.translate(hub.center.x, hub.center.y, hub.center.z);
-    addGeom('hub', band, clean(g));
   }
   const gallery = rooms.get('gallery');
   if (gallery) {
@@ -539,6 +619,8 @@ export function buildArena(arena: ArenaData): ArenaView {
       else { base.set(gallery.center.x + along, y, gallery.center.z - hz); dir.set(0, 0, 1); }
       const near = arena.doorways.some((d) => d.room.id === 'gallery' && base.distanceTo(new THREE.Vector3(d.center.x, d.center.y, d.center.z)) < d.size);
       if (near) continue;
+      // root it in the displaced rock rather than the nominal wall plane
+      base.addScaledVector(dir, -fbm(base.x * 0.06, base.y * 0.06, base.z * 0.06) * (DISPLACE[gallery.theme]?.wall ?? 0));
       dir.add(new THREE.Vector3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.8)).normalize();
       const g = convex(crystalPoints(1.0 + rnd() * 0.4, 0.25 + rnd() * 0.15));
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir));

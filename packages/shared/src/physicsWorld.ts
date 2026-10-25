@@ -1,6 +1,6 @@
 import * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
 import { boxRotation, type Mover, type Prop } from './arena/blueprint.js';
-import { crystalPoints, pillarPoints, rockPoints } from './arena/shapes.js';
+import { crystalPoints, pillarPoints, rockPoints, spikePoints } from './arena/shapes.js';
 import { boxContains, boxDistance, doorClearanceBox, getA, type ArenaData, type Axis } from './arena/generate.js';
 import { moverPose, posedSpheres } from './arena/movers.js';
 import type { ShipClassDef } from './classes/types.js';
@@ -61,6 +61,10 @@ function propCollider(p: Prop, origin: V3): RAPIER.ColliderDesc | null {
       break;
     case 'crystal':
       d = RAPIER.ColliderDesc.convexHull(new Float32Array(crystalPoints(p.length, p.radius)));
+      qfromTo(rot, Y_UP, p.dir);
+      break;
+    case 'spike':
+      d = RAPIER.ColliderDesc.convexHull(new Float32Array(spikePoints(p.length, p.radius, p.seed)));
       qfromTo(rot, Y_UP, p.dir);
       break;
     case 'ring':

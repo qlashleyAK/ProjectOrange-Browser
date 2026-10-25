@@ -21,7 +21,8 @@ export type ServerMsg =
   | { t: 'reload'; version: string }
   | { t: 'full' }
   | { t: 'roster'; players: RosterEntry[] }
-  | { t: 'match'; phase: MatchPhase; phaseEndTick: number; winnerId: number; tick: number }
+  /** `arena` is the map being played (it changes between matches); `nextArena` the one after it */
+  | { t: 'match'; phase: MatchPhase; phaseEndTick: number; winnerId: number; tick: number; arena: string; nextArena: string }
   | { t: 'pickups'; list: PickupInfo[] }
   | { t: 'ev'; tick: number; list: GameEvent[] }
   | { t: 'vanish'; shipId: number };

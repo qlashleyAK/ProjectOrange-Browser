@@ -73,6 +73,7 @@ export class OnlineSource implements ViewSource {
   private pickupMap = new Map<number, PickupInfo>();
   private rosterList: RosterEntry[] = [];
   private matchState = { phase: 'waiting' as MatchPhase, phaseEndTick: 0, winnerId: -1, startTick: 0 };
+  private nextArena: string | null = null;
   private owner: OwnerSnap | null = null;
   private ownerTick = 0;
   private deathTick = -1;
@@ -106,9 +107,16 @@ export class OnlineSource implements ViewSource {
     this.predictor.dispose();
     this.predictor = new Predictor(a);
     this.predictor.weaponsEnabled = weapons;
+    this.predictor.shipId = this.shipId;
     this.arena = a;
     this.owner = null;
     this.cosmetic = [];
+    // between matches (rotation), everything still tracked belongs to the old map
+    this.remotes.clear();
+    this.remoteProj.clear();
+    this.missilesById.clear();
+    this.pickupMap.clear();
+    this.queued = [];
   }
 
   // ------------------------------------------------------------------ connection
@@ -161,6 +169,8 @@ export class OnlineSource implements ViewSource {
       case 'full': this.setStatus('full'); break;
       case 'roster': this.rosterList = m.players; break;
       case 'match': {
+        if (m.arena) this.switchArena(m.arena);
+        this.nextArena = m.nextArena ?? null;
         if (m.phase === 'inProgress' && this.matchState.phase !== 'inProgress') this.matchState.startTick = m.tick;
         this.matchState.phase = m.phase; this.matchState.phaseEndTick = m.phaseEndTick; this.matchState.winnerId = m.winnerId;
         this.predictor.weaponsEnabled = m.phase === 'inProgress' || m.phase === 'waiting';
@@ -556,6 +566,7 @@ export class OnlineSource implements ViewSource {
     return {
       phase: m.phase, timeLeft: Math.max(0, (m.phaseEndTick - this.serverNow) * DT), winnerId: m.winnerId,
       elapsed: m.phase === 'inProgress' ? Math.max(0, (this.serverNow - m.startTick) * DT) : 0,
+      nextArena: this.nextArena,
     };
   }
 

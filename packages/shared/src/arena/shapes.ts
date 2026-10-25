@@ -59,6 +59,25 @@ export function pillarPoints(radius: number, height: number, seed: number): numb
   return out;
 }
 
+/**
+ * Irregular cone along +Y with its tip at y=length. The root reaches 0.35 length behind y=0 and flares,
+ * so a stalactite based just inside a room stays buried in the displaced rock face.
+ */
+export function spikePoints(length: number, radius: number, seed: number): number[] {
+  const rng = new Rng(seed);
+  const out: number[] = [];
+  const seg = 7;
+  for (const [t, k] of [[-0.35, 1.3], [0, 1], [0.35, 0.6], [0.7, 0.28]] as const) {
+    for (let j = 0; j < seg; j++) {
+      const a = (j / seg) * Math.PI * 2 + rng.range(-0.3, 0.3);
+      const r = radius * k * rng.range(0.75, 1.0);
+      out.push(Math.cos(a) * r, length * t, Math.sin(a) * r);
+    }
+  }
+  out.push(rng.range(-0.15, 0.15) * radius, length, rng.range(-0.15, 0.15) * radius);
+  return out;
+}
+
 /** Elongated octahedron along +Y from y=0 to y=length. */
 export function crystalPoints(length: number, radius: number): number[] {
   const mid = length * 0.3;

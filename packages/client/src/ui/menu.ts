@@ -82,7 +82,7 @@ export class Menu {
 
     const map = arenaInfo(settings.arena);
     const mapRow = h('div', 'row', p);
-    h('label', '', mapRow, 'Map');
+    h('label', '', mapRow, 'First map');
     const sel = h('select', '', mapRow) as HTMLSelectElement;
     for (const m of ARENAS) { const o = h('option', '', sel, esc(m.name)) as HTMLOptionElement; o.value = m.id; }
     sel.value = map.id;
@@ -92,12 +92,12 @@ export class Menu {
       a.mapChanged(sel.value);
       this.showMain(a, roomFromUrl);
     });
-    h('div', 'sub map-blurb', p, esc(map.blurb));
+    h('div', 'sub map-blurb', p, `${esc(map.blurb)} · maps rotate every match`);
 
     if (roomFromUrl) button(p, `Join room ${roomFromUrl}`, 'Private match from your invite link', () => { commit(); a.joinPrivate(roomFromUrl); }, true);
-    button(p, 'Quick Play', `${map.name} · ${this.regionText || 'Join the fullest public match'}`, () => { commit(); a.quickPlay(); }, !roomFromUrl);
-    button(p, 'Practice vs bots', `${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
-    button(p, 'Create private room', `${map.name} · get a code and an invite link`, () => { commit(); a.createPrivate(); });
+    button(p, 'Quick Play', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
+    button(p, 'Practice vs bots', `Starts on ${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
+    button(p, 'Create private room', `Starts on ${map.name} · get a code and an invite link`, () => { commit(); a.createPrivate(); });
     const jr = h('div', 'row', p);
     const code = h('input', '', jr) as HTMLInputElement;
     code.type = 'text'; code.placeholder = 'Room code'; code.maxLength = 12;

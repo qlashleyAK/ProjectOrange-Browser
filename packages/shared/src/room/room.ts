@@ -1,4 +1,4 @@
-import { arenaById, DEFAULT_ARENA } from '../arena/registry.js';
+import { arenaById, DEFAULT_ARENA, nextInRotation } from '../arena/registry.js';
 import { CLASS_IDS, type ClassId } from '../classes/index.js';
 import {
   BOT_BACKFILL_TARGET, BUILD_VERSION, DT, LAG_COMP_MAX_TICKS, MAX_INPUTS_PER_SECOND, MAX_PARTICIPANTS,
@@ -47,8 +47,10 @@ export interface RoomOptions {
   offline?: boolean;
   botSkill?: BotSkill;
   seed?: number;
-  /** arena id from the registry (defaults to DEFAULT_ARENA) */
+  /** arena id from the registry (defaults to DEFAULT_ARENA): the first map of the rotation */
   arena?: string;
+  /** move to the next map after every match (default true) */
+  rotation?: boolean;
   now?: () => number;
   log?: (msg: string) => void;
 }
@@ -91,6 +93,7 @@ export class GameRoom {
     this.sim = new GameSim({
       seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline,
       botSkill: o.botSkill ?? 'normal', arena: arenaById(o.arena ?? DEFAULT_ARENA),
+      nextArena: o.rotation === false ? undefined : nextInRotation,
     });
     this.lastHumanAt = this.now();
     this.backfill();
@@ -341,7 +344,10 @@ export class GameRoom {
 
   private matchMsg(): ServerMsg {
     const m = this.sim.match;
-    return { t: 'match', phase: m.phase, phaseEndTick: m.phaseEndTick, winnerId: m.winnerId, tick: this.sim.tick };
+    return {
+      t: 'match', phase: m.phase, phaseEndTick: m.phaseEndTick, winnerId: m.winnerId, tick: this.sim.tick,
+      arena: this.sim.arena.blueprint.id, nextArena: this.sim.upcomingArena().blueprint.id,
+    };
   }
   private broadcastMatch(): void {
     this.lastMatchAt = this.now();

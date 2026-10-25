@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  BOT_BACKFILL_TARGET, BUILD_VERSION, DT, GameRoom, InputFlag, MAX_PARTICIPANTS, MsgType, Reader, decodeSnapshot,
+  BOT_BACKFILL_TARGET, BUILD_VERSION, DT, GameRoom, InputFlag, MAX_PARTICIPANTS, MsgType, POSTMATCH_S, Reader, decodeSnapshot,
   encodeInputPacket, initPhysics, neutralInput, type ClientLink, type ServerMsg, type Snapshot,
 } from '../src/index.js';
 
@@ -127,5 +127,23 @@ describe('GameRoom', () => {
     const s = room.sim.ship(id)!;
     expect(s.input.tFwd).toBe(1);
     expect(s.input.flags & InputFlag.Repel).toBe(0);
+  });
+
+  it('tells clients which map is next, then moves them to it after the match', () => {
+    const { room, advance } = makeRoom();
+    const c = new FakeClient();
+    room.connect(c);
+    room.message(c, hello());
+    expect(c.last('match')).toMatchObject({ arena: 'hollowdeep', nextArena: 'gyre' });
+    room.sim.forceInProgress();
+    room.sim.match.phaseEndTick = room.sim.tick + 1;
+    advance(2);
+    expect(c.last('match')).toMatchObject({ phase: 'postMatch', arena: 'hollowdeep', nextArena: 'gyre' });
+    advance(Math.round(POSTMATCH_S / DT) + 5);
+    expect(c.last('match')).toMatchObject({ phase: 'warmup', arena: 'gyre', nextArena: 'tower' });
+    expect(room.sim.arena.blueprint.id).toBe('gyre');
+    // the player is flying in the new map's world
+    advance(10);
+    expect(c.snaps.at(-1)!.owner).not.toBeNull();
   });
 });

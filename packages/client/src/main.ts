@@ -69,6 +69,7 @@ function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string):
 const AMBIENCE_OF: Record<Theme, string> = {
   refinery: 'hub', industrial: 'foundry', hangar: 'dock', reactor: 'reactor', rock: 'gallery', machinery: 'crusher', tunnel: 'tunnel', sewer: 'tunnel',
   office: 'hub', garage: 'gallery', roof: 'wind', shaft: 'tunnel',
+  mine: 'hub', works: 'foundry', cave: 'gallery', drift: 'tunnel',
 };
 const tunnelRoomsOf = (a: ArenaData) => new Map<string, [string, string]>(a.blueprint.tunnels.map((t) => [t.id, [t.a, t.b]]));
 
@@ -457,7 +458,7 @@ async function boot(): Promise<void> {
     if ((place?.id ?? null) !== lastPlace) {
       lastPlace = place?.id ?? null;
       const room = place?.kind === 'room' ? arena.blueprint.rooms.find((r) => r.id === place.id) : undefined;
-      audio.setPlace(room ? AMBIENCE_OF[room.theme] : null, place?.kind === 'tunnel');
+      audio.setPlace(room ? (room.ambience ?? AMBIENCE_OF[room.theme]) : null, place?.kind === 'tunnel');
     }
     if (L?.alive && localView) {
       const speed = Math.hypot(localView.vel.x, localView.vel.y, localView.vel.z);

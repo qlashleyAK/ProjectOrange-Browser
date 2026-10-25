@@ -49,6 +49,10 @@ export function partSpheres(p: Prop): Sphere[] {
     }
     case 'pillar': return boxSpheres(p.center, v3(p.radius * 2, p.height, p.radius * 2));
     case 'rock': return [{ c: p.center, r: p.radius * 1.15 * Math.max(1, p.squash ?? 1) }];
+    case 'spike': {
+      const m = p.length * 0.325;
+      return [{ c: v3(p.center.x + p.dir.x * m, p.center.y + p.dir.y * m, p.center.z + p.dir.z * m), r: p.length * 0.675 + p.radius * 1.3 }];
+    }
     case 'crystal': {
       const h = p.length / 2;
       return [{ c: v3(p.center.x + p.dir.x * h, p.center.y + p.dir.y * h, p.center.z + p.dir.z * h), r: h + p.radius }];

@@ -17,7 +17,7 @@ let roomCounter = 0;
 
 function log(msg: string): void { console.log(`[${new Date().toISOString()}] ${msg}`); }
 
-/** The arena only applies when the room is created; joiners get whatever map the room is already running. */
+/** The arena only picks where a new room's rotation starts; joiners get whatever map the room is on. */
 function getRoom(id: string, isPrivate: boolean, arena = DEFAULT_ROOM_ARENA): GameRoom {
   let r = rooms.get(id);
   if (!r) {
@@ -34,11 +34,11 @@ const arenaParam = (url: URL): string | undefined => {
   return isArenaId(a) ? a : undefined;
 };
 
-/** Fullest public room on the requested map with a free human slot, otherwise a new one. */
+/** Fullest public room with a free human slot, whatever map its rotation is on; otherwise a new one starting on `arena`. */
 function quickplayRoom(arena = DEFAULT_ROOM_ARENA): GameRoom {
   let best: GameRoom | null = null;
   for (const r of rooms.values()) {
-    if (r.isPrivate || !r.hasFreeSlot || r.sim.arena.blueprint.id !== arena) continue;
+    if (r.isPrivate || !r.hasFreeSlot) continue;
     if (!best || r.humans > best.humans) best = r;
   }
   return best ?? getRoom(`PUB${(++roomCounter).toString(36).toUpperCase()}`, false, arena);

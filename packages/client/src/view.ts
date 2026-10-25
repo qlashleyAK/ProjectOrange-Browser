@@ -75,7 +75,8 @@ export interface LocalState {
 export interface ProjView { id: number; ownerId: number; weapon: PrimaryDef; pos: V3; vel: V3; age: number }
 export interface MissileView { id: number; ownerId: number; kind: string; color: number; pos: V3; vel: V3 }
 export interface PickupView { id: number; pos: V3; units: number; drop: boolean; expireIn: number; killerId: number }
-export interface MatchView { phase: MatchPhase; timeLeft: number; winnerId: number; elapsed: number }
+/** `nextArena`: id of the map the following match is played on (null until the server has said) */
+export interface MatchView { phase: MatchPhase; timeLeft: number; winnerId: number; elapsed: number; nextArena: string | null }
 
 export interface NetStats { ping: number; loss: number; jitter: number; interpDelay: number; snapshotAge: number; corrections: number; bufferDepth: number; serverTick: number; bandwidthIn: number; bandwidthOut: number }
 

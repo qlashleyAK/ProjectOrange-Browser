@@ -1,5 +1,5 @@
 import {
-  activePrimary, cloakVisible, DT, GameSim, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3, vlerp,
+  activePrimary, cloakVisible, DT, GameSim, nextInRotation, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3, vlerp,
   type ArenaData, type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
 } from '@orange/shared';
 import type { LocalState, MatchView, MissileView, PickupView, ProjView, ShipView, ViewSource } from '../view';
@@ -28,6 +28,7 @@ export function matchViewOf(sim: GameSim): MatchView {
     timeLeft: Math.max(0, (m.phaseEndTick - sim.tick) * DT),
     winnerId: m.winnerId,
     elapsed: m.phase === 'inProgress' ? (sim.tick - m.startTick) * DT : 0,
+    nextArena: sim.upcomingArena().blueprint.id,
   };
 }
 
@@ -61,7 +62,7 @@ export class OfflineSource implements ViewSource {
   private shipViews = new Map<number, ShipView>();
 
   constructor(private input: InputSampler, name: string, cls: ClassId, botSkill: BotSkill, arena?: ArenaData, bots = 5) {
-    this.sim = new GameSim({ seed: (Math.random() * 1e9) | 0, offline: true, botSkill, arena });
+    this.sim = new GameSim({ seed: (Math.random() * 1e9) | 0, offline: true, botSkill, arena, nextArena: nextInRotation });
     const me = this.sim.addPlayer('local', name || 'Pilot', cls);
     this.localId = me.id;
     for (let i = 0; i < bots; i++) this.sim.addBot();
