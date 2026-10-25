@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { BUILD_VERSION, GameRoom, initPhysics, type ClientLink } from '@orange/shared';
+import { arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, type ClientLink } from '@orange/shared';
 
 const PORT = Number(process.env.PORT ?? 2567);
 const REGION = process.env.REGION ?? 'local';
+const DEFAULT_ROOM_ARENA = isArenaId(process.env.ARENA) ? process.env.ARENA : DEFAULT_ARENA;
 const ROOM_IDLE_MS = 60_000;
 const here = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '../../client/dist'));
@@ -16,25 +17,31 @@ let roomCounter = 0;
 
 function log(msg: string): void { console.log(`[${new Date().toISOString()}] ${msg}`); }
 
-function getRoom(id: string, isPrivate: boolean): GameRoom {
+/** The arena only applies when the room is created; joiners get whatever map the room is already running. */
+function getRoom(id: string, isPrivate: boolean, arena = DEFAULT_ROOM_ARENA): GameRoom {
   let r = rooms.get(id);
   if (!r) {
-    r = new GameRoom({ id, isPrivate, log });
+    r = new GameRoom({ id, isPrivate, arena, log });
     r.start();
     rooms.set(id, r);
-    log(`room ${id} created (${isPrivate ? 'private' : 'public'})`);
+    log(`room ${id} created (${isPrivate ? 'private' : 'public'}, ${arenaInfo(arena).name})`);
   }
   return r;
 }
 
-/** Fullest public room with a free human slot, otherwise a new one. */
-function quickplayRoom(): GameRoom {
+const arenaParam = (url: URL): string | undefined => {
+  const a = url.searchParams.get('arena');
+  return isArenaId(a) ? a : undefined;
+};
+
+/** Fullest public room on the requested map with a free human slot, otherwise a new one. */
+function quickplayRoom(arena = DEFAULT_ROOM_ARENA): GameRoom {
   let best: GameRoom | null = null;
   for (const r of rooms.values()) {
-    if (r.isPrivate || !r.hasFreeSlot) continue;
+    if (r.isPrivate || !r.hasFreeSlot || r.sim.arena.blueprint.id !== arena) continue;
     if (!best || r.humans > best.humans) best = r;
   }
-  return best ?? getRoom(`PUB${(++roomCounter).toString(36).toUpperCase()}`, false);
+  return best ?? getRoom(`PUB${(++roomCounter).toString(36).toUpperCase()}`, false, arena);
 }
 
 function sanitizeCode(code: string): string { return code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12); }
@@ -71,9 +78,9 @@ async function main(): Promise<void> {
       return;
     }
     if (url.pathname === '/quickplay') {
-      const r = quickplayRoom();
+      const r = quickplayRoom(arenaParam(url));
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ room: r.id, region: REGION }));
+      res.end(JSON.stringify({ room: r.id, region: REGION, arena: r.sim.arena.blueprint.id }));
       return;
     }
     if (url.pathname === '/status') {
@@ -90,8 +97,9 @@ async function main(): Promise<void> {
     if (url.pathname !== '/ws') { socket.destroy(); return; }
     const code = sanitizeCode(url.searchParams.get('room') ?? '');
     const isPrivate = url.searchParams.get('private') === '1';
+    const arena = arenaParam(url);
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const room = code ? getRoom(code, isPrivate || !code.startsWith('PUB')) : quickplayRoom();
+      const room = code ? getRoom(code, isPrivate || !code.startsWith('PUB'), arena) : quickplayRoom(arena);
       attach(ws, room);
     });
   });
@@ -107,7 +115,7 @@ async function main(): Promise<void> {
     }
   }, 5000);
 
-  http.listen(PORT, () => log(`Project Orange server ${BUILD_VERSION} listening on :${PORT} (region ${REGION})`));
+  http.listen(PORT, () => log(`Project Orange server ${BUILD_VERSION} listening on :${PORT} (region ${REGION}, default map ${arenaInfo(DEFAULT_ROOM_ARENA).name})`));
 }
 
 function attach(ws: WebSocket, room: GameRoom): void {

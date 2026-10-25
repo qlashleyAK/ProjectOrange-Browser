@@ -1,7 +1,7 @@
 import {
   BUILD_VERSION, castStatic, CLASS_LIST, classByIndex, DT, encodeInputPacket, encodePing, END_REASONS, INPUT_SEND_HZ,
   INPUT_BUFFER_TARGET_MAX, MAX_INPUTS_PER_PACKET, MsgType, PRIMARY_TABLE, quantizeInput, Reader, decodeSnapshot, resolveTier,
-  RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, ShipFlag, TIME_DILATION, activePrimary, v3, q4,
+  RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, safeZoneAt, ShipFlag, TIME_DILATION, activePrimary, v3, q4,
   type ArenaData, type ClassId, type ClientMsg, type GameEvent, type InputCmd, type MatchPhase, type OwnerSnap,
   type PickupInfo, type PrimaryDef, type Q4, type RAPIER, type RosterEntry, type ServerMsg, type ShipSnap, type Snapshot, type V3,
 } from '@orange/shared';
@@ -32,12 +32,13 @@ export interface OnlineOptions {
   /** offline worker: no reconnection, pause allowed */
   offline: boolean;
   onStatus?: (s: NetStatus, detail?: string) => void;
+  /** map id from the welcome → arena; without it the client stays on the arena it was built with */
+  resolveArena?: (id: string) => ArenaData;
 }
 
 /** Networked view: predicted local ship, interpolated remote entities, delayed positional events. */
 export class OnlineSource implements ViewSource {
   readonly online: boolean;
-  readonly world: RAPIER.World;
   private transport: Transport;
   private clock = new ClockSync();
   private predictor: Predictor;
@@ -82,16 +83,32 @@ export class OnlineSource implements ViewSource {
   private out: GameEvent[] = [];
   private localView: ShipView;
   private timeBase = performance.now() / 1000;
+  private inputN = 0;
+  private envBase = 0;
 
   constructor(
-    readonly arena: ArenaData, private input: InputSampler, private name: string, cls: ClassId, private opts: OnlineOptions,
+    public arena: ArenaData, private input: InputSampler, private name: string, cls: ClassId, private opts: OnlineOptions,
   ) {
     this.online = !opts.offline;
     this.pendingClass = cls;
     this.predictor = new Predictor(arena);
-    this.world = this.predictor.world;
     this.localView = this.blankView(-1, true);
     this.transport = this.open();
+  }
+
+  get world(): RAPIER.World { return this.predictor.world; }
+
+  private switchArena(id: string): void {
+    if (id === this.arena.blueprint.id || !this.opts.resolveArena) return;
+    const a = this.opts.resolveArena(id);
+    if (a.blueprint.id === this.arena.blueprint.id) return;
+    const weapons = this.predictor.weaponsEnabled;
+    this.predictor.dispose();
+    this.predictor = new Predictor(a);
+    this.predictor.weaponsEnabled = weapons;
+    this.arena = a;
+    this.owner = null;
+    this.cosmetic = [];
   }
 
   // ------------------------------------------------------------------ connection
@@ -129,9 +146,11 @@ export class OnlineSource implements ViewSource {
   private onJson(m: ServerMsg): void {
     switch (m.t) {
       case 'welcome':
+        if (m.arena) this.switchArena(m.arena);
         this.welcomed = true;
         this.shipId = m.shipId;
         this.predictor.shipId = m.shipId;
+        this.predictor.resetEnvClock();
         this.token = m.token;
         this.roomId = m.roomId;
         this.clock.seed(m.tick);
@@ -298,8 +317,10 @@ export class OnlineSource implements ViewSource {
       cmd.tick = Math.round(serverNow + (this.clock.rtt / 2) / DT) + i;
       quantizeInput(cmd);
       this.pending.push(cmd);
+      this.inputN++;
+      this.envBase = this.predictor.envTickFor(cmd, this.inputN);
       if (this.predictor.active) {
-        const v = this.predictor.step(cmd);
+        const v = this.predictor.step(cmd, this.inputN);
         if (v) this.spawnCosmetic(v);
       }
       this.acc -= DT;
@@ -396,6 +417,7 @@ export class OnlineSource implements ViewSource {
       v.bulwark = (sh.flags & ShipFlag.Bulwark) !== 0;
       v.overdrive = (sh.flags & ShipFlag.Overdrive) !== 0;
       v.spawnProtected = (sh.flags & ShipFlag.SpawnProtected) !== 0;
+      v.safe = (sh.flags & ShipFlag.Safe) !== 0;
       v.boosting = (sh.flags & ShipFlag.Boosting) !== 0;
     }
   }
@@ -413,7 +435,7 @@ export class OnlineSource implements ViewSource {
     return {
       id, name: '', isBot: false, classId: 'dart', accent: 0, alive: false, gen: 0, pos: v3(), rot: q4(), vel: v3(),
       hullFrac: 1, shieldFrac: 1, power: 0, tierIndex: -1, cloaked: false, shimmer: false, bulwark: false, overdrive: false,
-      spawnProtected: false, boosting: false, isLocal,
+      spawnProtected: false, safe: false, boosting: false, isLocal,
     };
   }
 
@@ -435,6 +457,7 @@ export class OnlineSource implements ViewSource {
       v.bulwark = o.bulwarkHp > 0 && o.abilityActive > 0 && this.predictor.def.ability.id === 'bulwark';
       v.overdrive = o.abilityActive > 0 && this.predictor.def.ability.id === 'overdrive';
       v.spawnProtected = this.ownerTick < o.spawnProtectedUntil;
+      v.safe = this.predictor.safe;
       v.boosting = this.predictor.flight.boosting;
       out.push(v);
     }
@@ -459,7 +482,10 @@ export class OnlineSource implements ViewSource {
       power: alive ? power : 0, tier, boostMeter: fl.boostMeter, boostLocked: fl.boostLocked, dodgeCooldown: fl.dodgeCooldown,
       lockTarget: o?.lockTarget ?? -1, lockProgress: o?.lockProgress ?? 0, locked: o?.locked ?? false,
       lockWarn: o?.lockWarn ?? 0, missileWarn: o?.missileWarn ?? 0,
-      spawnProtected: !!o && this.ownerTick < o.spawnProtectedUntil, cloaked: o?.cloaked ?? false, bulwarkHp: o?.bulwarkHp ?? 0,
+      spawnProtected: !!o && this.ownerTick < o.spawnProtectedUntil,
+      safe: alive && this.predictor.safe, safeCharge: alive ? this.predictor.safeCharge : SAFE_ZONE_CHARGE_S,
+      inSafeZone: alive && safeZoneAt(this.arena, this.predictor.pos) !== null,
+      cloaked: o?.cloaked ?? false, bulwarkHp: o?.bulwarkHp ?? 0,
       respawnIn: alive ? 0 : Math.max(0, (dead + RESPAWN_DELAY_S / DT - this.serverNow) * DT),
       holdSpawn: this.holdSpawn,
       holdLeft: alive ? 0 : Math.max(0, (dead + RESPAWN_HOLD_MAX_S / DT - this.serverNow) * DT),
@@ -535,6 +561,7 @@ export class OnlineSource implements ViewSource {
 
   drainEvents(): GameEvent[] { const e = this.out; this.out = []; return e; }
   time(): number { return performance.now() / 1000 - this.timeBase; }
+  envTick(): number { return this.inputN > 0 ? this.envBase - 1 + this.alpha : this.serverNow; }
   setClass(c: ClassId): void { this.pendingClass = c; this.sendJson({ t: 'class', classId: c }); }
   setHold(hold: boolean): void { this.holdSpawn = hold; this.sendJson({ t: 'hold', hold }); }
   setPaused(p: boolean): void {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
-  BULWARK_ABSORB, CLASS_LIST, generateArena, hollowdeep, initPhysics, lineOfSight, placeAt,
-  type ArenaData, type ClassId, type GameEvent,
+  arenaById, BULWARK_ABSORB, CLASS_LIST, initPhysics, lineOfSight, placeAt,
+  type ArenaData, type ClassId, type GameEvent, type Theme,
 } from '@orange/shared';
 import './style.css';
 import { buildArena, type ArenaView } from './arena/arenaMesh';
@@ -57,13 +57,19 @@ async function pingRegions(): Promise<RegionInfo | null> {
   return results[0] ?? null;
 }
 
-function wsUrl(origin: string, room: string, isPrivate: boolean): string {
+/** `arena` only matters if the server has to create the room; existing rooms keep their map. */
+function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string): string {
   const u = new URL(origin);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   u.pathname = '/ws';
-  u.search = `?room=${encodeURIComponent(room)}${isPrivate ? '&private=1' : ''}`;
+  u.search = `?room=${encodeURIComponent(room)}${isPrivate ? '&private=1' : ''}&arena=${encodeURIComponent(arena)}`;
   return u.toString();
 }
+
+const AMBIENCE_OF: Record<Theme, string> = {
+  refinery: 'hub', industrial: 'foundry', hangar: 'dock', reactor: 'reactor', rock: 'gallery', machinery: 'crusher', tunnel: 'tunnel', sewer: 'tunnel',
+};
+const tunnelRoomsOf = (a: ArenaData) => new Map<string, [string, string]>(a.blueprint.tunnels.map((t) => [t.id, [t.a, t.b]]));
 
 function randomCode(): string {
   const A = 'ABCDEFGHJKLMNQRSTUVWXYZ23456789';
@@ -84,11 +90,10 @@ async function boot(): Promise<void> {
 
   await physics;
   const t0 = performance.now();
-  const arena: ArenaData = generateArena(hollowdeep());
-  const arenaView: ArenaView = buildArena(arena);
+  let arena: ArenaData = arenaById(settings.arena);
+  let arenaView: ArenaView = buildArena(arena);
   renderer.scene.add(arenaView.group);
-  const tunnelRooms = new Map<string, [string, string]>(arena.blueprint.tunnels.map((t) => [t.id, [t.a, t.b]]));
-  const lights = new LightRig(renderer.scene, arenaView, arena.adjacency, tunnelRooms);
+  const lights = new LightRig(renderer.scene, arenaView, arena.adjacency, tunnelRoomsOf(arena));
   const effects = new Effects(renderer.scene);
   const shipR = new ShipRenderer(renderer.scene, effects);
   const projR = new ProjectileRenderer(renderer.scene);
@@ -107,6 +112,20 @@ async function boot(): Promise<void> {
   let lastPlace: string | null = null;
   const losCache = new Map<number, { t: number; vis: boolean }>();
   const urlRoom = new URLSearchParams(location.search).get('room')?.toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
+
+  const useArena = (a: ArenaData) => {
+    if (a === arena) return;
+    const t1 = performance.now();
+    renderer.scene.remove(arenaView.group);
+    arenaView.dispose();
+    arena = a;
+    arenaView = buildArena(a);
+    renderer.scene.add(arenaView.group);
+    lights.setArena(arenaView, a.adjacency, tunnelRoomsOf(a));
+    lastPlace = null;
+    losCache.clear();
+    console.info(`${a.blueprint.name} ready in ${(performance.now() - t1).toFixed(0)} ms`);
+  };
 
   const applySettings = () => {
     if (settings.quality !== 'auto') renderer.setQuality(settings.quality);
@@ -141,6 +160,7 @@ async function boot(): Promise<void> {
       practice: () => startPractice(),
       createPrivate: () => void startOnline('private', randomCode()),
       joinPrivate: (code) => void startOnline('private', code),
+      mapChanged: (id) => useArena(arenaById(id)),
     }, urlRoom);
     audio.startMusic('menu');
   };
@@ -215,7 +235,7 @@ async function boot(): Promise<void> {
     let code = room;
     if (kind === 'quick') {
       try {
-        const r = await fetch(`${region.origin}/quickplay`, { cache: 'no-store' });
+        const r = await fetch(`${region.origin}/quickplay?arena=${encodeURIComponent(settings.arena)}`, { cache: 'no-store' });
         code = ((await r.json()) as { room: string }).room;
       } catch {
         connecting = false;
@@ -229,9 +249,10 @@ async function boot(): Promise<void> {
     if (kind === 'private' && code) history.replaceState(null, '', `${location.pathname}?room=${code}`);
     const cls = settings.firstVisit ? 'dart' : settings.lastClass;
     const src = new OnlineSource(arena, input, settings.name || 'Pilot', cls, {
-      makeTransport: () => new WsTransport(wsUrl(region.origin, code!, kind === 'private')),
+      makeTransport: () => new WsTransport(wsUrl(region.origin, code!, kind === 'private', settings.arena)),
       offline: false,
       onStatus: statusMessage,
+      resolveArena: arenaById,
     });
     beginSession({ source: src, kind, room: code, origin: region.origin });
   };
@@ -239,15 +260,17 @@ async function boot(): Promise<void> {
   const startPractice = (mainThread = false) => {
     audio.unlock();
     const cls: ClassId = settings.firstVisit ? 'dart' : settings.lastClass;
+    const map = arenaById(settings.arena);
     let src: ViewSource;
     if (!mainThread && typeof Worker !== 'undefined') {
       connecting = true;
       menu.showMessage('Starting practice…', 'Spinning up bots');
-      src = new OnlineSource(arena, input, settings.name || 'Pilot', cls, {
-        makeTransport: () => new WorkerTransport(settings.botSkill), offline: true, onStatus: statusMessage,
+      src = new OnlineSource(map, input, settings.name || 'Pilot', cls, {
+        makeTransport: () => new WorkerTransport(settings.botSkill, map.blueprint.id), offline: true, onStatus: statusMessage,
+        resolveArena: arenaById,
       });
     } else {
-      src = new OfflineSource(input, settings.name || 'Pilot', cls, settings.botSkill);
+      src = new OfflineSource(input, settings.name || 'Pilot', cls, settings.botSkill, map);
       menu.hide();
       input.enabled = true;
       input.requestLock();
@@ -273,7 +296,7 @@ async function boot(): Promise<void> {
     input.releaseLock();
     paused = false;
     if (urlRoom || location.search) history.replaceState(null, '', location.pathname);
-    if (toMenu) showMain();
+    if (toMenu) { useArena(arenaById(settings.arena)); showMain(); }
   };
 
   // ---------------------------------------------------------------- input wiring
@@ -347,10 +370,11 @@ async function boot(): Promise<void> {
     const s = session;
 
     if (!s) {
-      // menu backdrop: a slow drift through the hub
+      // menu backdrop: a slow drift through the hub (or the first room of other maps)
       const hub = arena.blueprint.rooms.find((r) => r.id === 'hub') ?? arena.blueprint.rooms[0]!;
       const t = nowMs / 1000 * 0.05;
-      renderer.camera.position.set(hub.center.x + Math.cos(t) * hub.size.x * 0.32, hub.center.y + Math.sin(t * 0.7) * 12, hub.center.z + Math.sin(t) * hub.size.z * 0.32);
+      const orbit = hub.id === 'hub' ? 0.32 : 0.4;
+      renderer.camera.position.set(hub.center.x + Math.cos(t) * hub.size.x * orbit, hub.center.y + Math.sin(t * 0.7) * 12, hub.center.z + Math.sin(t) * hub.size.z * orbit);
       renderer.camera.lookAt(hub.center.x, hub.center.y, hub.center.z);
       renderer.setHorizontalFov(settings.fov);
       const place = arenaView.updateVisibility(renderer.camera.position);
@@ -365,6 +389,7 @@ async function boot(): Promise<void> {
 
     const src = s.source;
     src.update(dt);
+    if (src.arena !== arena) useArena(src.arena);
     const ships = src.ships();
     viewMap.clear();
     for (const v of ships) viewMap.set(v.id, v);
@@ -416,7 +441,7 @@ async function boot(): Promise<void> {
     const placeId = arenaView.updateVisibility(camPos);
     lights.updateStatic(placeId, camPos);
     lights.updateDynamic(effects.lightRequests, camPos);
-    arenaView.animate(time);
+    arenaView.animate(time, src.envTick());
     effects.update(dt, renderer.camera);
 
     // audio
@@ -424,7 +449,11 @@ async function boot(): Promise<void> {
     vC.set(0, 1, 0).applyQuaternion(renderer.camera.quaternion);
     audio.setListener(camPos, vB, vC);
     const place = placeAt(arena, camPos);
-    if ((place?.id ?? null) !== lastPlace) { lastPlace = place?.id ?? null; audio.setPlace(lastPlace, place?.kind === 'tunnel'); }
+    if ((place?.id ?? null) !== lastPlace) {
+      lastPlace = place?.id ?? null;
+      const room = place?.kind === 'room' ? arena.blueprint.rooms.find((r) => r.id === place.id) : undefined;
+      audio.setPlace(room ? AMBIENCE_OF[room.theme] : null, place?.kind === 'tunnel');
+    }
     if (L?.alive && localView) {
       const speed = Math.hypot(localView.vel.x, localView.vel.y, localView.vel.z);
       audio.engine({ faction: L.def.faction, speed01: Math.min(1, speed / (L.def.maxSpeed.fwd * L.def.boostSpeedMult)), boosting: localView.boosting, alive: true });

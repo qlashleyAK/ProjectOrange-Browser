@@ -1,5 +1,6 @@
 import { v3, type V3 } from '../math.js';
-import type { Blueprint, Prop, Room, Theme, Tunnel } from './blueprint.js';
+import type { Blueprint, Mover, Prop, Room, SafeZone, Theme, Tunnel } from './blueprint.js';
+import { moverClearance, moverSweeps, type Sweep } from './movers.js';
 
 export type Axis = 0 | 1 | 2;
 export const getA = (v: V3, a: Axis) => (a === 0 ? v.x : a === 1 ? v.y : v.z);
@@ -30,6 +31,10 @@ export interface ArenaData {
   /** room id -> adjacent rooms via tunnels */
   adjacency: Map<string, { room: string; tunnel: string }[]>;
   bounds: Box;
+  movers: Mover[];
+  /** every volume a mover can pass through, for keeping nav links, spawns and pickups out of the way */
+  sweeps: Sweep[];
+  safeZones: SafeZone[];
 }
 
 export function roomBox(r: Room): Box {
@@ -243,7 +248,17 @@ export function generateArena(bp: Blueprint): ArenaData {
 
   // Spawn candidates (validated against physics in physicsWorld)
   const spawns: SpawnPoint[] = [];
-  for (const r of bp.rooms) {
+  const safeZones = bp.safeZones ?? [];
+  for (const z of safeZones) {
+    const r = bp.rooms.find((x) => x.id === z.room);
+    if (!r) continue;
+    for (const deg of [90, 210, 330]) {
+      const a = (deg * Math.PI) / 180, off = z.radius * 0.4;
+      const pos = v3(z.center.x + Math.cos(a) * off, z.center.y, z.center.z + Math.sin(a) * off);
+      spawns.push({ pos, facing: v3(r.center.x - pos.x, 0, r.center.z - pos.z), room: r.id });
+    }
+  }
+  for (const r of safeZones.length ? [] : bp.rooms) {
     const dirs: V3[] = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(1, 0, 1), v3(-1, 0, -1), v3(1, 0, -1), v3(-1, 0, 1)];
     const doorFaces = doorways.filter((d) => d.room === r && d.axis !== 1).map((d) => ({ axis: d.axis, side: d.side }));
     const scored = dirs.map((d, i) => {
@@ -271,7 +286,26 @@ export function generateArena(bp: Blueprint): ArenaData {
     bounds.max.x = Math.max(bounds.max.x, b.max.x); bounds.max.y = Math.max(bounds.max.y, b.max.y); bounds.max.z = Math.max(bounds.max.z, b.max.z);
   }
 
-  return { blueprint: bp, slabs, doorways, segments, elbows, regions, spawns, roomBoxes, adjacency, bounds };
+  const movers = bp.movers ?? [];
+  const sweeps = movers.flatMap(moverSweeps);
+  return { blueprint: bp, slabs, doorways, segments, elbows, regions, spawns, roomBoxes, adjacency, bounds, movers, sweeps, safeZones };
+}
+
+/** Distance from a point to the nearest point of a box (0 inside). */
+export function boxDistance(b: Box, p: V3): number {
+  const dx = Math.max(b.min.x - p.x, 0, p.x - b.max.x);
+  const dy = Math.max(b.min.y - p.y, 0, p.y - b.max.y);
+  const dz = Math.max(b.min.z - p.z, 0, p.z - b.max.z);
+  return Math.hypot(dx, dy, dz);
+}
+
+/** The safe zone containing `p`, if any. */
+export function safeZoneAt(a: ArenaData, p: V3): SafeZone | null {
+  for (const z of a.safeZones) {
+    const dx = p.x - z.center.x, dy = p.y - z.center.y, dz = p.z - z.center.z;
+    if (dx * dx + dy * dy + dz * dz <= z.radius * z.radius) return z;
+  }
+  return null;
 }
 
 /** Interior boxes for every tunnel piece. */
@@ -333,6 +367,21 @@ export function validateArenaGeometry(a: ArenaData): string[] {
     if (!rb) { errors.push(`prop in unknown room ${p.room}`); continue; }
     if (!boxContains(rb, p.center, 0.5)) errors.push(`prop ${p.kind} outside room ${p.room}`);
   }
+  // movers: sweeping against walls, doors and each other is checked with physics (validateMovers)
+  for (const m of a.movers) {
+    const rb = a.roomBoxes.get(m.room);
+    if (!rb) errors.push(`mover ${m.id} in unknown room ${m.room}`);
+    else if (!boxContains(rb, m.origin)) errors.push(`mover ${m.id} origin outside room ${m.room}`);
+  }
+  for (const z of a.safeZones) {
+    const rb = a.roomBoxes.get(z.room);
+    if (!rb) { errors.push(`safe zone ${z.id} in unknown room ${z.room}`); continue; }
+    const inner: Box = { min: v3(rb.min.x + z.radius + 2, rb.min.y + z.radius + 2, rb.min.z + z.radius + 2), max: v3(rb.max.x - z.radius - 2, rb.max.y - z.radius - 2, rb.max.z - z.radius - 2) };
+    if (!boxContains(inner, z.center)) errors.push(`safe zone ${z.id} does not fit inside ${z.room}`);
+    for (const d of a.doorways) if (boxDistance(doorClearanceBox(d), z.center) < z.radius) errors.push(`safe zone ${z.id} blocks doorway ${d.id}`);
+    if (moverClearance(a.sweeps, z.center) < z.radius + 6) errors.push(`safe zone ${z.id} is in a mover's path`);
+  }
+  for (const s of a.spawns) if (moverClearance(a.sweeps, s.pos) < 20) errors.push(`spawn in ${s.room} is within 20 m of a mover's path`);
   return errors;
 }
 

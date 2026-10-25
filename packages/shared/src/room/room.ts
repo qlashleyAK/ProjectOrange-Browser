@@ -1,3 +1,4 @@
+import { arenaById, DEFAULT_ARENA } from '../arena/registry.js';
 import { CLASS_IDS, type ClassId } from '../classes/index.js';
 import {
   BOT_BACKFILL_TARGET, BUILD_VERSION, DT, LAG_COMP_MAX_TICKS, MAX_INPUTS_PER_SECOND, MAX_PARTICIPANTS,
@@ -46,6 +47,8 @@ export interface RoomOptions {
   offline?: boolean;
   botSkill?: BotSkill;
   seed?: number;
+  /** arena id from the registry (defaults to DEFAULT_ARENA) */
+  arena?: string;
   now?: () => number;
   log?: (msg: string) => void;
 }
@@ -85,7 +88,10 @@ export class GameRoom {
     this.offline = !!o.offline;
     this.now = o.now ?? (() => performance.now());
     this.log = o.log ?? (() => {});
-    this.sim = new GameSim({ seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline, botSkill: o.botSkill ?? 'normal' });
+    this.sim = new GameSim({
+      seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline,
+      botSkill: o.botSkill ?? 'normal', arena: arenaById(o.arena ?? DEFAULT_ARENA),
+    });
     this.lastHumanAt = this.now();
     this.backfill();
   }
@@ -176,7 +182,10 @@ export class GameRoom {
         }
         c.welcomed = true;
         this.lastHumanAt = this.now();
-        this.sendJson(c, { t: 'welcome', shipId: c.shipId, token: c.token, tick: this.sim.tick, roomId: this.id, version: BUILD_VERSION });
+        this.sendJson(c, {
+          t: 'welcome', shipId: c.shipId, token: c.token, tick: this.sim.tick, roomId: this.id, version: BUILD_VERSION,
+          arena: this.sim.arena.blueprint.id,
+        });
         this.sendJson(c, { t: 'roster', players: this.roster() });
         this.sendJson(c, this.matchMsg());
         this.sendJson(c, { t: 'pickups', list: this.pickupList() });
@@ -351,6 +360,7 @@ export class GameRoom {
     if (s.def.ability.id === 'bulwark' && s.abilityActive > 0 && s.bulwarkHp > 0) f |= ShipFlag.Bulwark;
     if (s.def.ability.id === 'overdrive' && s.abilityActive > 0) f |= ShipFlag.Overdrive;
     if (this.sim.tick < s.spawnProtectedUntil) f |= ShipFlag.SpawnProtected;
+    if (s.safe) f |= ShipFlag.Safe;
     if (s.input.flags & InputFlag.AssistOn) f |= ShipFlag.AssistOn;
     if (s.flight.boosting) f |= ShipFlag.Boosting;
     if (s.sweepUntil > this.sim.tick) f |= ShipFlag.Sweeping;
@@ -392,7 +402,7 @@ export class GameRoom {
           power: me.power, hull: me.hull, shield: me.shield, maxShield: me.maxShield,
           lockTarget: me.lock.targetId, lockProgress: me.lock.progress, locked: me.lock.locked, lockWarn: me.lockWarn, missileWarn: me.missileWarn,
           bulwarkHp: me.bulwarkHp, primaryLastFire: Math.max(0, me.primaryLastFire), muzzleIndex: me.muzzleIndex & 0xffff,
-          spawnProtectedUntil: me.spawnProtectedUntil, cloaked: me.cloaked,
+          spawnProtectedUntil: me.spawnProtectedUntil, cloaked: me.cloaked, safeCharge: me.safeCharge,
         };
       }
       const bytes = encodeSnapshot({
@@ -422,6 +432,9 @@ export class GameRoom {
 
   /** Owner-side stats for monitoring. */
   stats() {
-    return { id: this.id, humans: this.humans, participants: this.participants, tick: this.sim.tick, tickMs: this.tickMs, private: this.isPrivate };
+    return {
+      id: this.id, arena: this.sim.arena.blueprint.id, humans: this.humans, participants: this.participants, tick: this.sim.tick,
+      tickMs: this.tickMs, private: this.isPrivate,
+    };
   }
 }

@@ -930,8 +930,13 @@ Bots make the game alive with zero players online.
 - **Bot backfill:** keep at least **6** participants **[DECISION]**; the
   arena is large. When a human joins, remove one bot at its next death,
   never mid-fight.
-- **Quickplay:** `GET /quickplay` returns the fullest room with a free slot
-  in the best region; otherwise it creates one.
+- **Quickplay:** `GET /quickplay?arena=ID` returns the fullest room on that
+  map with a free slot in the best region; otherwise it creates one.
+- **Maps:** the menu's map selector (stored in settings) picks the map for
+  quick play, practice and new private rooms. A room keeps the map it was
+  created with; the welcome message names it and the client switches its
+  arena, prediction world and lights to match. The server's default map comes
+  from the `ARENA` environment variable (`hollowdeep` if unset).
 - **Region choice:** on load, the client pings each region's `/ping` 3 times
   and keeps the median.
 - **Private rooms:** `/?room=CODE` joins or creates a private room. A "Copy
@@ -1458,7 +1463,60 @@ small generated impulse responses):
 - **Gallery:** cave drip + crystal chime.
 - **Crusher:** grinding machinery.
 
-Tunnels use a short tight reverb.
+Tunnels use a short tight reverb. Other maps pick the ambience by room theme
+(refinery → Crucible, industrial → Foundry, hangar → Dock, reactor → Reactor,
+rock → Gallery, machinery → Crusher).
+
+### 15.8 Second map: "The Gyre" (`shared/arena/gyre.ts`)
+
+Five big halls with moving machinery and safe-zone spawns, built with the
+same blueprint pipeline and validations as Hollowdeep.
+
+| Room | Size (m) | Theme | Machinery |
+|---|---|---|---|
+| The Gyre (center) | 260 × 160 × 260 | refinery | three-arm rotor (40 s spin), boulder ring above (64 s, reverse), boulder ring below (52 s) |
+| Tumble Quarry (+X) | 220 × 150 × 220 | rock | vertical boulder wheel on glowing tethers (30 s) |
+| Shutter Works (−Z) | 220 × 110 × 200 | industrial | two sliding walls crossing ±70 m (16 s), two pistons pumping out of phase (10 s) |
+| Gantry Hangar (−X) | 240 × 100 × 200 | hangar | ceiling crane hauling a container 80 m (24 s) |
+| Halo Reactor (+Z) | 200 × 220 × 200 | reactor | three rings of shield plates orbiting the core, alternating direction |
+
+Four spokes link the center to each hall, and four corner tunnels link
+neighboring halls, giving at least 3 routes between every pair of rooms.
+
+**Moving fixtures (movers).** A mover is a group of prop parts with a motion,
+either a spin about an axis or a cosine slide along an offset. Its pose is a
+pure function of the tick (`moverPose`), so nothing is networked.
+
+- Movers are kinematic Rapier bodies in the static collision groups. Shots,
+  missiles, line of sight, camera collision and bot feelers all see them.
+- They push ships and never damage them. Movers only move parallel to nearby
+  surfaces or with wide gaps, so they can shove a ship but not crush it.
+- The server drives them to the current tick before each physics step.
+- The predictor drives them to `cmd.tick` plus the measured offset between
+  each input's `cmd.tick` and the server tick that applied it. The offset is
+  learned from owner snapshots, so pushes predict exactly. Non-consecutive
+  ticks (replays) teleport the movers instead of sweeping them.
+- The renderer poses them on the local ship's predicted timeline.
+- Validation (`validateMovers`) samples each full cycle. Movers must keep
+  16 m from static geometry, stay out of doorway clearance zones, stay inside
+  their room, and never touch each other.
+- Nav nodes and links, orange spawns, scattered rocks and spawn points avoid
+  each mover's swept volume (a torus for spins, a capsule for slides).
+
+**Safe zones.** Each zone is a sphere in a bay against the hall's far wall,
+radius 28 m, one per outer hall.
+
+- On a map with zones, all spawns are inside zones (3 per zone).
+- A ship inside a zone with charge left is **safe**. It takes no damage, can't
+  be locked or tracked by missiles, isn't shoved by repel, and bots ignore it.
+  It also can't fire, use its ability or repel.
+- Charge is 8 s and drains while inside. It recharges at 0.4 s per second
+  outside, and is full on spawn. Camping the zone runs it dry; the HUD shows
+  the time left, or "depleted — leave to recharge".
+- Oranges never spawn inside zones.
+- Clients see a fresnel shell with scan bands, plus a ring and "SAFE ZONE"
+  sign on the nearest wall. Safe ships wear a mint bubble; remote ships carry
+  `ShipFlag.Safe`, and the owner snapshot carries `safeCharge`.
 
 ---
 

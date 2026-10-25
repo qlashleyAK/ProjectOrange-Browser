@@ -1,6 +1,8 @@
 import * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
+import type { Mover, Prop } from './arena/blueprint.js';
 import { crystalPoints, pillarPoints, rockPoints } from './arena/shapes.js';
-import { doorClearanceBox, getA, type ArenaData, type Axis } from './arena/generate.js';
+import { boxContains, boxDistance, doorClearanceBox, getA, type ArenaData, type Axis } from './arena/generate.js';
+import { moverPose, posedSpheres } from './arena/movers.js';
 import type { ShipClassDef } from './classes/types.js';
 import { DT } from './constants.js';
 import { DEG, q4, qfromAxisAngle, qfromTo, v3, vdist, vlerp, vnorm, type Q4, type V3 } from './math.js';
@@ -37,7 +39,41 @@ export function createWorld(): RAPIER.World {
   return world;
 }
 
-/** Add every arena collider in blueprint order (slabs then props). Determinism depends on this order. */
+/** Collider for a colliding prop, placed at `p.center - origin` (body space), or null for visual-only props. */
+function propCollider(p: Prop, origin: V3): RAPIER.ColliderDesc | null {
+  if (!p.collides) return null;
+  let d: RAPIER.ColliderDesc | null = null;
+  const rot = q4();
+  switch (p.kind) {
+    case 'box':
+      d = RAPIER.ColliderDesc.cuboid(p.size.x / 2, p.size.y / 2, p.size.z / 2);
+      if (p.rotY) qfromAxisAngle(rot, Y_UP, p.rotY);
+      break;
+    case 'cylinder':
+      d = RAPIER.ColliderDesc.cylinder(p.height / 2, p.radius);
+      if (p.axis === 'x') Object.assign(rot, Z90); else if (p.axis === 'z') Object.assign(rot, X90);
+      break;
+    case 'rock':
+      d = RAPIER.ColliderDesc.convexHull(new Float32Array(rockPoints(p.radius, p.seed, p.squash ?? 1)));
+      break;
+    case 'pillar':
+      d = RAPIER.ColliderDesc.convexHull(new Float32Array(pillarPoints(p.radius, p.height, p.seed)));
+      break;
+    case 'crystal':
+      d = RAPIER.ColliderDesc.convexHull(new Float32Array(crystalPoints(p.length, p.radius)));
+      qfromTo(rot, Y_UP, p.dir);
+      break;
+    case 'ring':
+      break;
+  }
+  if (!d) return null;
+  return d.setTranslation(p.center.x - origin.x, p.center.y - origin.y, p.center.z - origin.z).setRotation(rot)
+    .setFriction(ARENA_FRICTION).setCollisionGroups(STATIC_GROUPS).setSolverGroups(STATIC_GROUPS);
+}
+
+const ORIGIN = v3();
+
+/** Add every static arena collider in blueprint order (slabs then props). Determinism depends on this order. */
 export function addArenaColliders(world: RAPIER.World, arena: ArenaData): RAPIER.RigidBody {
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   for (const s of arena.slabs) {
@@ -47,37 +83,47 @@ export function addArenaColliders(world: RAPIER.World, arena: ArenaData): RAPIER
     world.createCollider(d, body);
   }
   for (const p of arena.blueprint.props) {
-    if (!p.collides) continue;
-    let d: RAPIER.ColliderDesc | null = null;
-    const rot = q4();
-    switch (p.kind) {
-      case 'box':
-        d = RAPIER.ColliderDesc.cuboid(p.size.x / 2, p.size.y / 2, p.size.z / 2);
-        if (p.rotY) qfromAxisAngle(rot, Y_UP, p.rotY);
-        break;
-      case 'cylinder':
-        d = RAPIER.ColliderDesc.cylinder(p.height / 2, p.radius);
-        if (p.axis === 'x') Object.assign(rot, Z90); else if (p.axis === 'z') Object.assign(rot, X90);
-        break;
-      case 'rock':
-        d = RAPIER.ColliderDesc.convexHull(new Float32Array(rockPoints(p.radius, p.seed, p.squash ?? 1)));
-        break;
-      case 'pillar':
-        d = RAPIER.ColliderDesc.convexHull(new Float32Array(pillarPoints(p.radius, p.height, p.seed)));
-        break;
-      case 'crystal':
-        d = RAPIER.ColliderDesc.convexHull(new Float32Array(crystalPoints(p.length, p.radius)));
-        qfromTo(rot, Y_UP, p.dir);
-        break;
-      case 'ring':
-        break;
-    }
-    if (!d) continue;
-    d.setTranslation(p.center.x, p.center.y, p.center.z).setRotation(rot)
-      .setFriction(ARENA_FRICTION).setCollisionGroups(STATIC_GROUPS).setSolverGroups(STATIC_GROUPS);
-    world.createCollider(d, body);
+    const d = propCollider(p, ORIGIN);
+    if (d) world.createCollider(d, body);
   }
   return body;
+}
+
+export interface MoverBody { def: Mover; body: RAPIER.RigidBody }
+
+/**
+ * Kinematic bodies for the arena's movers, posed at `tick`. They share the static collision groups, so
+ * ships bounce off them and every static query (shots, line of sight, feelers) sees them.
+ */
+export function addMovers(world: RAPIER.World, arena: ArenaData, tick: number): MoverBody[] {
+  const pos = v3(), rot = q4();
+  return arena.movers.map((m) => {
+    moverPose(m, tick, pos, rot);
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z).setRotation(rot));
+    for (const p of m.parts) {
+      const d = propCollider(p, m.origin);
+      if (d) world.createCollider(d, body);
+    }
+    return { def: m, body };
+  });
+}
+
+const _mp = v3(), _mr = q4();
+/** Target pose for the coming physics step; Rapier derives the velocity that pushes ships. */
+export function driveMovers(movers: MoverBody[], tick: number): void {
+  for (const m of movers) {
+    moverPose(m.def, tick, _mp, _mr);
+    m.body.setNextKinematicTranslation(_mp);
+    m.body.setNextKinematicRotation(_mr);
+  }
+}
+/** Teleport without imparting velocity (prediction rewinds). */
+export function placeMovers(movers: MoverBody[], tick: number): void {
+  for (const m of movers) {
+    moverPose(m.def, tick, _mp, _mr);
+    m.body.setTranslation(_mp, true);
+    m.body.setRotation(_mr, true);
+  }
 }
 
 export function shipColliderDescs(def: ShipClassDef): RAPIER.ColliderDesc[] {
@@ -207,6 +253,43 @@ export function validateArenaPhysics(world: RAPIER.World, arena: ArenaData, cast
     const c = v3((box.max.x + box.min.x) / 2, (box.max.y + box.min.y) / 2, (box.max.z + box.min.z) / 2);
     if (world.intersectionWithShape(c, IDENT, shape, undefined, QUERY_STATIC) !== null) {
       errors.push(`doorway clearance blocked at ${d.id} (${d.room.id}, axis ${'xyz'[d.axis as Axis]}=${getA(d.center, d.axis)})`);
+    }
+  }
+  return errors;
+}
+
+/** A moving part never gets closer than this to static geometry, so a ship can't be pinned against a wall. */
+export const MOVER_CLEARANCE = 16;
+
+/**
+ * Sweep every mover through its cycle against a world holding only the static arena: it keeps
+ * MOVER_CLEARANCE from walls and props, stays out of doorway clearance zones and never touches another mover.
+ */
+export function validateMovers(world: RAPIER.World, arena: ArenaData, samples = 96): string[] {
+  const errors: string[] = [];
+  for (const m of arena.movers) {
+    const rb = arena.roomBoxes.get(m.room);
+    const doors = arena.doorways.filter((d) => d.room.id === m.room).map((d) => ({ d, box: doorClearanceBox(d, 20, 0) }));
+    const cycle = Math.abs(m.motion.period) / DT;
+    let wall = false, outside = false, door = '';
+    for (let k = 0; k < samples; k++) {
+      for (const s of posedSpheres(m, (k / samples) * cycle)) {
+        if (!wall && !sphereFree(world, s.c, s.r + MOVER_CLEARANCE)) wall = true;
+        if (rb && !boxContains(rb, s.c)) outside = true;
+        if (!door) for (const { d, box } of doors) if (boxDistance(box, s.c) < s.r) door = d.id;
+      }
+    }
+    if (wall) errors.push(`mover ${m.id} comes within ${MOVER_CLEARANCE} m of static geometry`);
+    if (outside) errors.push(`mover ${m.id} leaves room ${m.room}`);
+    if (door) errors.push(`mover ${m.id} sweeps through doorway ${door}`);
+  }
+  // kinematic bodies pass through each other, which would look broken
+  for (let i = 0; i < arena.movers.length; i++) for (let j = i + 1; j < arena.movers.length; j++) {
+    const a = arena.movers[i]!, b = arena.movers[j]!;
+    if (a.room !== b.room) continue;
+    for (let t = 0; t < 240 / DT; t += 15) {
+      const sa = posedSpheres(a, t), sb = posedSpheres(b, t);
+      if (sa.some((p) => sb.some((q) => vdist(p.c, q.c) < p.r + q.r))) { errors.push(`movers ${a.id} and ${b.id} collide`); break; }
     }
   }
   return errors;

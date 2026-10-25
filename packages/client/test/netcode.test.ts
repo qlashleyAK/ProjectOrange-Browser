@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
-  GameRoom, generateArena, hollowdeep, initPhysics, InputFlag, neutralInput, vdist,
+  arenaById, GameRoom, generateArena, hollowdeep, initPhysics, InputFlag, neutralInput, q4, vdist,
   type ArenaData, type ClientLink, type InputCmd,
 } from '@orange/shared';
 import { OnlineSource } from '../src/modes/online';
@@ -146,4 +146,78 @@ describe('client netcode against a real room', () => {
     expect(src.missiles().filter((m) => m.ownerId === src.shipId)).toHaveLength(0);
     src.dispose();
   });
+
+  it('switches to the map the room is running and predicts safe-zone state there', () => {
+    fakeMs = 1000;
+    const room = new GameRoom({ id: 'GYR', now: () => fakeMs, seed: 5, arena: 'gyre' });
+    const { t, pump } = wire(room, 30);
+    const src = new OnlineSource(arena, new ScriptedInput(), 'Tester', 'dart', { makeTransport: () => t, offline: false, resolveArena: arenaById });
+    t.onopen();
+    const frameMs = 1000 / 60;
+    let sawSafe = false, safeMismatch = 0, maxErr = 0, compared = 0;
+    let gen = -1, genChangedAt = 0;
+    for (let i = 0; i < 60 * 10; i++) {
+      fakeMs += frameMs;
+      pump();
+      room.tick();
+      pump();
+      src.update(frameMs / 1000);
+      src.drainEvents();
+      const me = room.sim.ship(src.shipId);
+      const g = me?.generation ?? -1;
+      if (g !== gen) { gen = g; genChangedAt = i; }
+      const L = src.local();
+      if (L?.alive && L.safe) sawSafe = true;
+      if (i > 60 * 2 && i - genChangedAt > 20 && L?.alive && me?.alive) {
+        const hist = (src as unknown as { predictor: { history: Map<number, { pos: { x: number; y: number; z: number }; st: { safe: boolean } }> } }).predictor.history;
+        const h = hist.get(me.input.seq);
+        if (h) { maxErr = Math.max(maxErr, vdist(h.pos, me.pos)); compared++; if (h.st.safe !== me.safe) safeMismatch++; }
+      }
+    }
+    expect(src.arena.blueprint.id).toBe('gyre');
+    expect(src.arena.movers.length).toBeGreaterThan(0);
+    expect(sawSafe).toBe(true);
+    expect(compared).toBeGreaterThan(200);
+    expect(safeMismatch).toBeLessThan(3);
+    expect(maxErr).toBeLessThan(0.5);
+    src.dispose();
+  });
+
+  it('predicts being shoved by a sliding wall without corrections (movers on the server timeline)', () => {
+    fakeMs = 1000;
+    const room = new GameRoom({ id: 'SHV', now: () => fakeMs, seed: 5, arena: 'gyre' });
+    room.sim.forceInProgress();
+    const { t, pump } = wire(room, 30);
+    const src = new OnlineSource(arena, new Idle(), 'Tester', 'brute', { makeTransport: () => t, offline: false, resolveArena: arenaById });
+    t.onopen();
+    const frameMs = 1000 / 60;
+    let placedAt = -1, maxErr = 0, compared = 0, corrAtPlace = 0;
+    const predictor = (src as unknown as { predictor: { corrections: number; history: Map<number, { pos: { x: number; y: number; z: number } }> } });
+    for (let i = 0; i < 60 * 24; i++) {
+      const me = room.sim.ship(src.shipId);
+      // shutter-a is at its west end once per 16 s cycle; park just past its east edge
+      if (placedAt < 0 && me?.alive && i > 120 && room.sim.tick % 960 < 8) {
+        room.sim.placeShip(me, { x: 14, y: 0, z: -322 }, q4());
+        placedAt = i;
+      }
+      fakeMs += frameMs;
+      pump(); room.tick(); pump();
+      src.update(frameMs / 1000);
+      src.drainEvents();
+      if (placedAt >= 0 && i - placedAt === 30) corrAtPlace = predictor.predictor.corrections;
+      if (placedAt >= 0 && i - placedAt > 30 && me?.alive) {
+        const h = predictor.predictor.history.get(me.input.seq);
+        if (h) { maxErr = Math.max(maxErr, vdist(h.pos, me.pos)); compared++; }
+      }
+    }
+    const me = room.sim.ship(src.shipId)!;
+    expect(placedAt).toBeGreaterThan(0);
+    expect(me.pos.x).toBeGreaterThan(40);
+    expect(compared).toBeGreaterThan(200);
+    expect(maxErr).toBeLessThan(0.05);
+    expect(predictor.predictor.corrections - corrAtPlace).toBeLessThan(5);
+    src.dispose();
+  });
 });
+
+class Idle { beginFrame(): void {} sample(): InputCmd { return neutralInput(0, 0); } }

@@ -1,4 +1,4 @@
-import { BUILD_VERSION } from '@orange/shared';
+import { arenaInfo, ARENAS, BUILD_VERSION } from '@orange/shared';
 import { copyText } from '../hud/hud';
 import { resetSettings, saveSettings, settings, type Settings } from '../settings';
 
@@ -7,6 +7,7 @@ export interface MainMenuActions {
   practice: () => void;
   createPrivate: () => void;
   joinPrivate: (code: string) => void;
+  mapChanged: (id: string) => void;
 }
 
 export interface PauseActions {
@@ -71,7 +72,7 @@ export class Menu {
     const p = this.open();
     this.back = null;
     h('h1', '', p, 'PROJECT <span class="orange">ORANGE</span>');
-    h('div', 'sub', p, 'Six-degrees-of-freedom arena combat in the Hollowdeep Mine.');
+    h('div', 'sub', p, 'Six-degrees-of-freedom arena combat.');
     const row = h('div', 'row', p);
     h('label', '', row, 'Pilot name');
     const name = h('input', '', row) as HTMLInputElement;
@@ -79,10 +80,24 @@ export class Menu {
     name.addEventListener('change', () => { settings.name = name.value.trim().slice(0, 16); saveSettings(); });
     const commit = () => { settings.name = name.value.trim().slice(0, 16); saveSettings(); };
 
+    const map = arenaInfo(settings.arena);
+    const mapRow = h('div', 'row', p);
+    h('label', '', mapRow, 'Map');
+    const sel = h('select', '', mapRow) as HTMLSelectElement;
+    for (const m of ARENAS) { const o = h('option', '', sel, esc(m.name)) as HTMLOptionElement; o.value = m.id; }
+    sel.value = map.id;
+    sel.addEventListener('change', () => {
+      commit();
+      settings.arena = sel.value; saveSettings();
+      a.mapChanged(sel.value);
+      this.showMain(a, roomFromUrl);
+    });
+    h('div', 'sub map-blurb', p, esc(map.blurb));
+
     if (roomFromUrl) button(p, `Join room ${roomFromUrl}`, 'Private match from your invite link', () => { commit(); a.joinPrivate(roomFromUrl); }, true);
-    button(p, 'Quick Play', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
-    button(p, 'Practice vs bots', `Offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
-    button(p, 'Create private room', 'Get a code and an invite link', () => { commit(); a.createPrivate(); });
+    button(p, 'Quick Play', `${map.name} · ${this.regionText || 'Join the fullest public match'}`, () => { commit(); a.quickPlay(); }, !roomFromUrl);
+    button(p, 'Practice vs bots', `${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
+    button(p, 'Create private room', `${map.name} · get a code and an invite link`, () => { commit(); a.createPrivate(); });
     const jr = h('div', 'row', p);
     const code = h('input', '', jr) as HTMLInputElement;
     code.type = 'text'; code.placeholder = 'Room code'; code.maxLength = 12;

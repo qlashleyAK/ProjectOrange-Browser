@@ -14,7 +14,7 @@ export function applyDamage(sim: GameSim, target: Ship, amount: number, attacker
   const res: DamageResult = { shield: 0, hull: 0, killed: false };
   if (!target.alive || amount <= 0) return res;
   if (!sim.damageEnabled()) return res;
-  if (sim.tick < target.spawnProtectedUntil) return res;
+  if (sim.tick < target.spawnProtectedUntil || target.safe) return res;
   if (attackerId === target.id) return res; // no self-damage
   let rem = amount;
   if (target.shield > 0) {

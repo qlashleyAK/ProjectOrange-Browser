@@ -17,7 +17,7 @@ export type ClientMsg =
   | { t: 'hold'; hold: boolean };
 
 export type ServerMsg =
-  | { t: 'welcome'; shipId: number; token: string; tick: number; roomId: string; version: string }
+  | { t: 'welcome'; shipId: number; token: string; tick: number; roomId: string; version: string; arena: string }
   | { t: 'reload'; version: string }
   | { t: 'full' }
   | { t: 'roster'; players: RosterEntry[] }

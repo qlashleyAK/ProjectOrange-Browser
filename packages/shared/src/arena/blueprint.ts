@@ -21,7 +21,25 @@ export type Prop = PropBase & (
   | { kind: 'ring'; center: V3; radius: number; tube: number; axis: 'x' | 'y' | 'z' }
 );
 
-export interface Blueprint { name: string; rooms: Room[]; tunnels: Tunnel[]; props: Prop[]; seed: number }
+/** Pose is a pure function of the tick (arena/movers.ts), so every simulation agrees on it without networking it. */
+export type MoverMotion =
+  /** full turn about `origin` every `period` seconds (negative = reverse) */
+  | { kind: 'spin'; axis: 'x' | 'y' | 'z'; period: number; phase?: number }
+  /** eased out to `origin + offset` and back every `period` seconds */
+  | { kind: 'slide'; offset: V3; period: number; phase?: number };
+
+/** A rigid assembly of props on one kinematic body. Parts are in world space at the rest pose. */
+export interface Mover { id: string; room: string; origin: V3; parts: Prop[]; motion: MoverMotion }
+
+/** Inside, a ship can't be damaged, locked or shoved, and can't fire, for a limited, recharging time. */
+export interface SafeZone { id: string; room: string; center: V3; radius: number }
+
+export interface Blueprint {
+  id: string; name: string; rooms: Room[]; tunnels: Tunnel[]; props: Prop[]; seed: number;
+  movers?: Mover[];
+  /** when present, every spawn point is inside a safe zone */
+  safeZones?: SafeZone[];
+}
 
 const W = 4;
 export const ROOMS: Room[] = [
@@ -56,11 +74,11 @@ export const TUNNELS: Tunnel[] = [
 function roomById(id: string): Room { return ROOMS.find((r) => r.id === id)!; }
 
 /** Doorway lanes in room-relative space, used to keep seeded props clear of approach paths. */
-interface Lane { min: V3; max: V3 }
-function doorLanes(room: Room, depth: number, inflate: number): Lane[] {
+export interface Lane { min: V3; max: V3 }
+export function doorLanes(room: Room, depth: number, inflate: number, tunnels: Tunnel[] = TUNNELS): Lane[] {
   const lanes: Lane[] = [];
   const c = room.center, h = v3(room.size.x / 2, room.size.y / 2, room.size.z / 2);
-  for (const t of TUNNELS) {
+  for (const t of tunnels) {
     for (const [end, rid] of [[t.path[0]!, t.a], [t.path[t.path.length - 1]!, t.b]] as const) {
       if (rid !== room.id) continue;
       const rel = v3(end.x - c.x, end.y - c.y, end.z - c.z);
@@ -76,7 +94,7 @@ function doorLanes(room: Room, depth: number, inflate: number): Lane[] {
   }
   return lanes;
 }
-function sphereHitsLanes(c: V3, r: number, lanes: Lane[]): boolean {
+export function sphereHitsLanes(c: V3, r: number, lanes: Lane[]): boolean {
   for (const l of lanes) {
     const dx = Math.max(l.min.x - c.x, 0, c.x - l.max.x);
     const dy = Math.max(l.min.y - c.y, 0, c.y - l.max.y);
@@ -85,7 +103,7 @@ function sphereHitsLanes(c: V3, r: number, lanes: Lane[]): boolean {
   }
   return false;
 }
-function segmentHitsLanes(a: V3, b: V3, r: number, lanes: Lane[]): boolean {
+export function segmentHitsLanes(a: V3, b: V3, r: number, lanes: Lane[]): boolean {
   for (let i = 0; i <= 10; i++) {
     const t = i / 10;
     if (sphereHitsLanes(v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t), r, lanes)) return true;
@@ -279,5 +297,5 @@ function buildProps(seed: number): Prop[] {
 
 export const BLUEPRINT_SEED = 0x0a11ce;
 export function hollowdeep(): Blueprint {
-  return { name: 'Hollowdeep Mine', rooms: ROOMS, tunnels: TUNNELS, props: buildProps(BLUEPRINT_SEED), seed: BLUEPRINT_SEED };
+  return { id: 'hollowdeep', name: 'Hollowdeep Mine', rooms: ROOMS, tunnels: TUNNELS, props: buildProps(BLUEPRINT_SEED), seed: BLUEPRINT_SEED };
 }

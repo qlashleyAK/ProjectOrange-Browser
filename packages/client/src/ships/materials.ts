@@ -139,7 +139,7 @@ export function cloakMaterial(): THREE.ShaderMaterial & { uniforms: { uTime: { v
       uniform float uAlpha;
       varying vec3 vN; varying vec3 vV;
       void main() {
-        float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.5);
+        float f = pow(clamp(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.5);
         gl_FragColor = vec4(vec3(0.55, 0.75, 1.0) * (f * 1.6 + 0.1), uAlpha + f * 0.25);
       }`,
   }) as THREE.ShaderMaterial & { uniforms: { uTime: { value: number }; uAlpha: { value: number } } };

@@ -46,7 +46,7 @@ export class WorkerTransport implements Transport {
   bytesIn = 0;
   bytesOut = 0;
 
-  constructor(botSkill: string) {
+  constructor(botSkill: string, arena?: string) {
     this.worker = new Worker(new URL('../worker/offlineWorker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent) => {
       const d = e.data as { t: 'ready' } | { t: 'msg'; d: ArrayBuffer | string } | { t: 'error'; e: string };
@@ -55,7 +55,7 @@ export class WorkerTransport implements Transport {
       else if (d.t === 'error') this.onclose(d.e);
     };
     this.worker.onerror = (e) => this.onclose(e.message || 'worker error');
-    this.worker.postMessage({ t: 'init', botSkill });
+    this.worker.postMessage({ t: 'init', botSkill, arena });
   }
 
   send(data: Uint8Array | string): void {

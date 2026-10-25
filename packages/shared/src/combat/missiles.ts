@@ -12,7 +12,7 @@ export function forwardOf(out: V3, s: Ship): V3 { return qrot(out, s.rot, v3(0, 
 
 /** Can `s` currently target `t` for lock-on (cone, range, line of sight, visibility)? */
 export function lockCandidateScore(sim: GameSim, s: Ship, t: Ship, coneDeg: number, range: number): number {
-  if (!t.alive || t.id === s.id) return -1;
+  if (!t.alive || t.id === s.id || t.safe) return -1;
   if (!sim.canSee(s, t)) return -1;
   _d.x = t.pos.x - s.pos.x; _d.y = t.pos.y - s.pos.y; _d.z = t.pos.z - s.pos.z;
   const dist = vlen(_d);
@@ -121,7 +121,7 @@ export function updateMissiles(sim: GameSim): void {
     // homing
     if (m.tracking) {
       const t = sim.ship(m.targetId);
-      if (!t || !t.alive) { m.tracking = false; } else {
+      if (!t || !t.alive || t.safe) { m.tracking = false; } else {
         _d.x = t.pos.x - m.pos.x; _d.y = t.pos.y - m.pos.y; _d.z = t.pos.z - m.pos.z;
         const dist = vlen(_d);
         const vd = vnorm(v3(), m.vel);

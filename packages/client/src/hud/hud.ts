@@ -80,6 +80,7 @@ export class Hud {
   private shieldShimmer: HTMLElement;
   private vitalsLabel: HTMLElement;
   private protectedEl: HTMLElement;
+  private safeEl: HTMLElement;
   private energyBar: HTMLElement;
   private ammoEl: HTMLElement;
   private abilityIcon: HTMLElement;
@@ -158,6 +159,7 @@ export class Hud {
 
     this.vitals = el('div', 'vitals', this.layer);
     this.protectedEl = el('div', 'protected hidden', this.vitals, 'SPAWN PROTECTED');
+    this.safeEl = el('div', 'safe-zone hidden', this.vitals);
     const sb = el('div', 'bar', this.vitals);
     this.shieldBar = el('i', '', sb); this.shieldBar.style.background = 'var(--shield)';
     this.shieldShimmer = el('div', 'shimmer hidden', sb);
@@ -520,7 +522,14 @@ export class Hud {
 
   private updateVitals(f: HudFrame, L: LocalState): void {
     const def = L.def;
-    this.protectedEl.classList.toggle('hidden', !L.spawnProtected);
+    this.protectedEl.classList.toggle('hidden', !L.spawnProtected || L.safe);
+    this.safeEl.classList.toggle('hidden', !L.inSafeZone);
+    if (L.inSafeZone) {
+      this.safeEl.classList.toggle('depleted', !L.safe);
+      this.safeEl.textContent = L.safe
+        ? `SAFE ZONE · WEAPONS OFFLINE · ${Math.ceil(L.safeCharge)}s`
+        : 'SAFE ZONE DEPLETED — LEAVE TO RECHARGE';
+    }
     this.shieldBar.style.width = `${(L.maxShield > 0 ? L.shield / L.maxShield : 0) * 100}%`;
     this.shieldShimmer.classList.toggle('hidden', !(L.shield < L.maxShield && L.alive && !L.cloaked));
     const hf = L.hull / def.hull;

@@ -3,7 +3,7 @@ export const DT = 1 / TICK_RATE;
 export const MAX_TICKS_PER_FRAME = 6;
 export const MAX_FRAME_CARRY = 0.25;
 
-export const BUILD_VERSION = '0.1.0';
+export const BUILD_VERSION = '0.2.0';
 
 // Netcode (Section 13.10)
 export const SNAPSHOT_EVERY_TICKS = 2; // 30 Hz
@@ -57,6 +57,15 @@ export const REPEL_RADIUS = 45;
 export const REPEL_DV = 45;
 export const REPEL_COOLDOWN_S = 12;
 export const REPEL_MAX_TARGETS = 24;
+
+// Safe zones: protection drains while inside and recharges outside, so they can't be camped
+export const SAFE_ZONE_CHARGE_S = 8;
+export const SAFE_ZONE_RECHARGE_PER_S = 0.4;
+
+/** Safe-zone charge after one tick. */
+export function stepSafeCharge(charge: number, inZone: boolean): number {
+  return inZone ? Math.max(0, charge - DT) : Math.min(SAFE_ZONE_CHARGE_S, charge + SAFE_ZONE_RECHARGE_PER_S * DT);
+}
 
 // Perception (Section 11)
 export const BOT_SIGHT_RANGE = 600;

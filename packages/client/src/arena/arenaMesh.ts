@@ -3,7 +3,8 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  crystalPoints, getA, pillarPoints, placeAt, rockPoints, type ArenaData, type Axis, type Prop, type Slab, type V3,
+  crystalPoints, DT, getA, moverPose, pillarPoints, placeAt, q4, rockPoints, v3,
+  type ArenaData, type Axis, type Mover, type Prop, type Slab, type V3,
 } from '@orange/shared';
 import { ArenaMaterials } from './materials';
 
@@ -17,9 +18,12 @@ export interface ArenaView {
   updateVisibility(pos: V3): string | null;
   /** zones visible from a place */
   visibleZones(place: string | null): Set<string>;
-  animate(t: number): void;
+  /** `t` drives cosmetic pulses; `tick` poses moving fixtures (defaults to the tick at `t`) */
+  animate(t: number, tick?: number): void;
   dispose(): void;
 }
+
+export const SAFE_ZONE_COLOR = 0x6dffc9;
 
 // ------------------------------------------------------------------ small noise for rock displacement
 function hash3(x: number, y: number, z: number): number {
@@ -201,6 +205,67 @@ export function buildArena(arena: ArenaData): ArenaView {
     if (!g) continue;
     const m = mats.prop(p.material, p.emissive);
     addGeom(p.room, m, g);
+  }
+
+  // moving fixtures: one group per mover in body space, posed every frame
+  const movers: { def: Mover; group: THREE.Group }[] = [];
+  for (const m of arena.movers) {
+    const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    for (const p of m.parts) {
+      const g = propGeometry(p);
+      if (!g) continue;
+      g.translate(-m.origin.x, -m.origin.y, -m.origin.z);
+      const mat = mats.prop(p.material, p.emissive, true);
+      let arr = byMat.get(mat);
+      if (!arr) { arr = []; byMat.set(mat, arr); }
+      arr.push(g);
+    }
+    const mg = new THREE.Group();
+    mg.name = `mover:${m.id}`;
+    for (const [mat, geoms] of byMat) {
+      const merged = mergeGeometries(geoms, false);
+      for (const g of geoms) g.dispose();
+      if (!merged) continue;
+      merged.computeBoundingSphere();
+      mg.add(new THREE.Mesh(merged, mat));
+    }
+    mg.position.set(m.origin.x, m.origin.y, m.origin.z);
+    movers.push({ def: m, group: mg });
+    addObj(m.room, mg);
+  }
+
+  // safe zones: a shimmering shell, with a ring and sign on the nearest clear side wall
+  const shellMats: THREE.ShaderMaterial[] = [];
+  const safeRing = mats.glow(SAFE_ZONE_COLOR, 2.6);
+  for (const z of arena.safeZones) {
+    const room = rooms.get(z.room)!;
+    const mat = safeZoneMaterial();
+    shellMats.push(mat);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(z.radius, 64, 32), mat);
+    shell.position.set(z.center.x, z.center.y, z.center.z);
+    shell.renderOrder = 2;
+    addObj(z.room, shell);
+
+    const walls = ([[0, 1], [0, -1], [2, 1], [2, -1]] as [Axis, 1 | -1][]).map(([axis, sign]) => {
+      const gap = getA(room.size, axis) / 2 - sign * (getA(z.center, axis) - getA(room.center, axis));
+      const door = arena.doorways.some((d) => d.room.id === room.id && d.axis === axis && Math.sign(getA(d.inward, axis)) === -sign);
+      return { axis, sign, score: gap + (door ? 20 : 0) };
+    }).sort((a, b) => a.score - b.score);
+    const w = walls[0]!;
+    const n = new THREE.Vector3().setComponent(w.axis, -w.sign);
+    const onWall = new THREE.Vector3(z.center.x, z.center.y, z.center.z)
+      .setComponent(w.axis, getA(room.center, w.axis) + w.sign * getA(room.size, w.axis) / 2);
+    const ringR = z.radius * 0.8;
+    const ring = new THREE.TorusGeometry(ringR, 0.45, 8, 64);
+    if (w.axis === 0) ring.rotateY(Math.PI / 2);
+    ring.translate(onWall.x + n.x * 0.6, onWall.y, onWall.z + n.z * 0.6);
+    addGeom(z.room, safeRing, clean(ring));
+    const sign = signMesh('Safe zone', SAFE_ZONE_COLOR, 'none', 22);
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, n).normalize();
+    sign.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+    sign.position.copy(onWall).addScaledVector(up, ringR + 5).addScaledVector(n, 0.3);
+    addObj(z.room, sign);
   }
 
   // doorway frames in the destination's landmark color + signs
@@ -418,16 +483,20 @@ export function buildArena(arena: ArenaData): ArenaView {
     for (const o of objs) zg.add(o);
   }
 
-  // static light specs per room (landmark color)
+  // static light specs per room (landmark color): tall shafts get a light at each end, wide halls one per side
   const lights: RoomLightSpec[] = [];
   for (const r of arena.blueprint.rooms) {
     const big = Math.max(r.size.x, r.size.y, r.size.z);
+    const wide = Math.max(r.size.x, r.size.z);
     const color = new THREE.Color(r.landmark);
-    const pts: THREE.Vector3[] = r.id === 'reactor'
-      ? [new THREE.Vector3(r.center.x, r.center.y + 55, r.center.z + 25), new THREE.Vector3(r.center.x, r.center.y - 55, r.center.z - 25)]
-      : r.id === 'hub'
-        ? [new THREE.Vector3(r.center.x + 30, r.center.y + 30, r.center.z + 30), new THREE.Vector3(r.center.x - 30, r.center.y - 25, r.center.z - 30)]
-        : [new THREE.Vector3(r.center.x, r.center.y + r.size.y * 0.3, r.center.z)];
+    const at = (x: number, y: number, z: number) => new THREE.Vector3(r.center.x + x, r.center.y + y, r.center.z + z);
+    const pts: THREE.Vector3[] = r.id === 'hub'
+      ? [at(30, 30, 30), at(-30, -25, -30)]
+      : r.size.y > 1.5 * wide
+        ? [at(0, r.size.y * 0.25, r.size.z * 0.35), at(0, -r.size.y * 0.25, -r.size.z * 0.35)]
+        : wide >= 200
+          ? [at(r.size.x * 0.25, r.size.y * 0.3, r.size.z * 0.25), at(-r.size.x * 0.25, r.size.y * 0.3, -r.size.z * 0.25)]
+          : [at(0, r.size.y * 0.3, 0)];
     for (const p of pts) lights.push({ room: r.id, pos: p, color, intensity: big * big * 0.9 / pts.length, distance: big * 1.6 });
   }
 
@@ -467,11 +536,18 @@ export function buildArena(arena: ArenaData): ArenaView {
       }
       return id;
     },
-    animate(t: number) {
+    animate(t: number, tick = t / DT) {
       for (const a of animated) {
         const k = 0.75 + 0.25 * Math.sin(t * a.speed * Math.PI * 2);
         (a.mesh.material as THREE.MeshBasicMaterial).color.copy(a.base).multiplyScalar(k);
       }
+      for (const m of movers) {
+        if (!m.group.parent?.visible) continue;
+        moverPose(m.def, tick, _mp, _mq);
+        m.group.position.set(_mp.x, _mp.y, _mp.z);
+        m.group.quaternion.set(_mq.x, _mq.y, _mq.z, _mq.w);
+      }
+      for (const s of shellMats) s.uniforms.uTime!.value = t;
     },
     dispose() {
       group.traverse((o) => {
@@ -482,9 +558,42 @@ export function buildArena(arena: ArenaData): ArenaView {
           if (mm.map) mm.map.dispose();
         }
       });
+      for (const s of shellMats) s.dispose();
       mats.dispose();
     },
   };
+}
+
+const _mp = v3(), _mq = q4();
+
+/** Fresnel shell with slow scan bands: readable from outside, a faint haze from inside. */
+function safeZoneMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uColor: { value: new THREE.Color(SAFE_ZONE_COLOR) }, uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vW;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor; uniform float uTime; varying vec3 vN; varying vec3 vW;
+      void main() {
+        vec3 toCam = cameraPosition - vW;
+        float dist = length(toCam);
+        // pow() of a rounding-negative base is NaN, and bloom smears one NaN pixel into a black frame
+        float f = clamp(1.0 - abs(dot(normalize(vN), toCam / dist)), 0.0, 1.0);
+        float rim = pow(f, 1.6);
+        float phase = vW.y * 0.45 - uTime * 1.6;
+        float bands = smoothstep(0.86, 1.0, sin(phase) * 0.5 + 0.5) * (1.0 - smoothstep(0.4, 1.2, fwidth(phase)));
+        // spawn cameras sit right on the shell; fading it near the eye stops it popping through the near plane.
+        // Both faces stack at the silhouette, so the peak stays under the bloom threshold.
+        float a = (rim * 0.26 + bands * (0.02 + f * 0.1) + 0.008) * smoothstep(4.0, 18.0, dist);
+        gl_FragColor = vec4(uColor * a * 1.6, a);
+      }`,
+  });
 }
 
 function starfieldMaterial(): THREE.MeshBasicMaterial {

@@ -129,7 +129,7 @@ export class Effects {
         void main() {
           float d = dot(vP, normalize(uImpact));
           float spot = smoothstep(0.2, 1.0, d);
-          float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
+          float rim = pow(clamp(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.0);
           vec2 uv = vec2(atan(vP.z, vP.x) * 4.0, vP.y * 6.0);
           float h = hex(uv);
           float a = (spot * (0.6 + h * 0.8) + rim * 0.25) * uAmount;

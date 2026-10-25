@@ -68,6 +68,7 @@ export class BotBrain {
     // target choice: distance, low health, high power (bounty)
     let best: Ship | null = null, bestScore = -Infinity;
     for (const s of visible) {
+      if (s.safe) continue;
       const d = vdist(me.pos, s.pos);
       const health = (s.hull + s.shield) / (s.def.hull + s.def.shield);
       const score = -d / 150 + (1 - health) * 1.5 + s.power * 0.25 + (s.id === this.targetId ? 0.5 : 0);
@@ -199,7 +200,14 @@ export class BotBrain {
         break;
       }
       case 'retreat': {
-        if (!this.wander || vdist(me.pos, this.wander) < 25) {
+        const zone = me.safeCharge > 2
+          ? sim.arena.safeZones.reduce<{ c: V3; d: number } | null>((best, z) => {
+            const d = vdist(me.pos, z.center);
+            return !best || d < best.d ? { c: z.center, d } : best;
+          }, null)
+          : null;
+        if (zone && zone.d < 400) this.wander = { ...zone.c };
+        else if (!this.wander || vdist(me.pos, this.wander) < 25) {
           const rooms = sim.arena.blueprint.rooms.map((r) => ({
             r, n: sim.shipList.filter((s) => s.alive && s.id !== me.id && vdist(s.pos, r.center) < 120).length,
           })).sort((a, b) => a.n - b.n);
@@ -213,7 +221,7 @@ export class BotBrain {
         let dest: V3 | null = null;
         let nearest = Infinity;
         for (const s of sim.shipList) {
-          if (s.id === me.id || !s.alive) continue;
+          if (s.id === me.id || !s.alive || s.safe) continue;
           const d = vdist(s.pos, me.pos) - s.power * 30;
           if (d < nearest) { nearest = d; dest = s.pos; }
         }

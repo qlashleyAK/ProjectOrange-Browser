@@ -1,6 +1,6 @@
 import type * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
 import { hollowdeep } from './arena/blueprint.js';
-import { generateArena, placeAt, type ArenaData } from './arena/generate.js';
+import { generateArena, placeAt, safeZoneAt, type ArenaData } from './arena/generate.js';
 import { absorbBulwark, activateBulwark, bulwarkIntersect, endBulwark } from './abilities/bulwark.js';
 import { activateCloak, breakCloak } from './abilities/cloak.js';
 import { activateOverdrive, overdriveActive } from './abilities/overdrive.js';
@@ -11,7 +11,8 @@ import { NavGraph } from './bots/nav.js';
 import { botCanSee, cloakVisible } from './bots/perception.js';
 import { CLASSES, CLASS_IDS, type ClassId, type PrimaryDef } from './classes/index.js';
 import {
-  DT, MAX_POWER, RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
+  DT, MAX_POWER, RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
+  stepSafeCharge,
 } from './constants.js';
 import { recordPose } from './combat/hitVolumes.js';
 import { endMissile, launchSecondary, updateLock, updateMissiles } from './combat/missiles.js';
@@ -22,7 +23,9 @@ import { applyFlightControl, newFlightState } from './flight.js';
 import { InputFlag, neutralInput } from './input.js';
 import { chooseSpawn, newMatch, updateMatch, type MatchState } from './match.js';
 import { q4, qlookDir, v3, type V3 } from './math.js';
-import { addArenaColliders, createShipBody, createWorld, finalizeSpawns, RAPIER as R } from './physicsWorld.js';
+import {
+  addArenaColliders, addMovers, createShipBody, createWorld, driveMovers, finalizeSpawns, RAPIER as R, type MoverBody,
+} from './physicsWorld.js';
 import { dropOnDeath, populate, updatePickups } from './pickups.js';
 import { applyTierToVitals, resolveTier } from './power.js';
 import { Rng } from './rng.js';
@@ -43,6 +46,7 @@ export class GameSim {
   readonly rng: Rng;
   readonly warmupSeconds: number;
   readonly eventQueue: RAPIER.EventQueue;
+  readonly movers: MoverBody[];
   botSkill: BotSkill;
   tick = 0;
   ships = new Map<number, Ship>();
@@ -73,6 +77,9 @@ export class GameSim {
     this.world.step(); // build broadphase for queries
     finalizeSpawns(this.world, this.arena);
     this.nav = new NavGraph(this.world, this.arena);
+    // after the nav graph, which routes around movers' swept volumes rather than their current poses
+    this.movers = addMovers(this.world, this.arena, this.tick);
+    if (this.movers.length) this.world.step();
     this.eventQueue = new R.EventQueue(true);
   }
 
@@ -122,7 +129,8 @@ export class GameSim {
       primaryLastFire: -9999, secondaryLastFire: -9999, muzzleIndex: 0,
       abilityCooldown: 0, abilityActive: 0, repelCooldown: 0, cloaked: false, ambushReady: false, bulwarkHp: 0,
       sweepUntil: 0, sweepRevealed: new Set(), lock: { targetId: -1, progress: 0, locked: false }, secondaryHeld: false,
-      spawnProtectedUntil: 0, deathTick: this.tick - RESPAWN_DELAY_S / DT, respawnAt: this.tick, holdSpawn: false, removeAtDeath: false,
+      spawnProtectedUntil: 0, safe: false, safeCharge: SAFE_ZONE_CHARGE_S,
+      deathTick: this.tick - RESPAWN_DELAY_S / DT, respawnAt: this.tick, holdSpawn: false, removeAtDeath: false,
       stats: { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 },
       damagers: new Set(), input: neutralInput(), prevFlags: 0, lagTicks: 0, lockWarn: 0, missileWarn: 0, poseHistory: [],
     };
@@ -195,6 +203,7 @@ export class GameSim {
       s.body = null;
     }
     s.alive = false;
+    s.safe = false;
   }
 
   spawnShip(s: Ship): void {
@@ -216,6 +225,8 @@ export class GameSim {
     s.sweepUntil = 0; s.sweepRevealed.clear(); s.lock = { targetId: -1, progress: 0, locked: false };
     s.lastDamageTick = -9999; s.primaryLastFire = -9999; s.secondaryLastFire = -9999;
     s.spawnProtectedUntil = this.tick + Math.round(SPAWN_PROTECTION_S / DT);
+    s.safeCharge = SAFE_ZONE_CHARGE_S;
+    s.safe = safeZoneAt(this.arena, s.pos) !== null;
     s.damagers.clear();
     s.holdSpawn = false;
     s.poseHistory = [];
@@ -229,6 +240,13 @@ export class GameSim {
     s.body.setLinvel(vel, true); s.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     s.pos = { ...pos }; s.prevPos = { ...pos }; s.rot = { ...rot }; s.prevRot = { ...rot }; s.vel = { ...vel }; s.angvel = v3();
     s.poseHistory = [];
+    this.updateSafe(s, false);
+  }
+
+  private updateSafe(s: Ship, advance = true): void {
+    const inZone = safeZoneAt(this.arena, s.pos) !== null;
+    if (advance) s.safeCharge = stepSafeCharge(s.safeCharge, inZone);
+    s.safe = inZone && s.safeCharge > 0;
   }
 
   /** Force the match into progress (tests, debug). */
@@ -313,7 +331,7 @@ export class GameSim {
   private handleInput(s: Ship): void {
     const f = s.input.flags, pf = s.prevFlags;
     const pressed = (b: number) => (f & b) !== 0 && (pf & b) === 0;
-    const armed = this.weaponsEnabled();
+    const armed = this.weaponsEnabled() && !s.safe;
 
     if (armed && pressed(InputFlag.Ability) && s.abilityCooldown <= 0 && s.abilityActive <= 0) {
       const ab = s.def.ability;
@@ -387,6 +405,7 @@ export class GameSim {
       s.prevFlags = s.input.flags;
     }
 
+    driveMovers(this.movers, this.tick);
     this.world.step(this.eventQueue);
     this.eventQueue.drainContactForceEvents((e) => {
       const a = this.colliderShip.get(e.collider1()), b = this.colliderShip.get(e.collider2());
@@ -403,6 +422,7 @@ export class GameSim {
         s.rot.x = r.x; s.rot.y = r.y; s.rot.z = r.z; s.rot.w = r.w;
         s.vel.x = lv.x; s.vel.y = lv.y; s.vel.z = lv.z;
         s.angvel.x = av.x; s.angvel.y = av.y; s.angvel.z = av.z;
+        this.updateSafe(s);
       }
       recordPose(s, this.tick);
     }

@@ -1,6 +1,6 @@
 import {
-  activePrimary, cloakVisible, DT, GameSim, qslerp, q4, RESPAWN_HOLD_MAX_S, v3, vlerp,
-  type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
+  activePrimary, cloakVisible, DT, GameSim, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3, vlerp,
+  type ArenaData, type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
 } from '@orange/shared';
 import type { LocalState, MatchView, MissileView, PickupView, ProjView, ShipView, ViewSource } from '../view';
 
@@ -38,8 +38,9 @@ export function localStateOf(sim: GameSim, s: Ship, killerId: number): LocalStat
     abilityCooldown: s.abilityCooldown, abilityActive: s.abilityActive, repelCooldown: s.repelCooldown,
     power: s.power, tier: s.tier, boostMeter: s.flight.boostMeter, boostLocked: s.flight.boostLocked,
     dodgeCooldown: s.flight.dodgeCooldown, lockTarget: s.lock.targetId, lockProgress: s.lock.progress, locked: s.lock.locked,
-    lockWarn: s.lockWarn, missileWarn: s.missileWarn, spawnProtected: sim.tick < s.spawnProtectedUntil, cloaked: s.cloaked,
-    bulwarkHp: s.bulwarkHp,
+    lockWarn: s.lockWarn, missileWarn: s.missileWarn, spawnProtected: sim.tick < s.spawnProtectedUntil,
+    safe: s.safe, safeCharge: s.safeCharge, inSafeZone: s.alive && safeZoneAt(sim.arena, s.pos) !== null,
+    cloaked: s.cloaked, bulwarkHp: s.bulwarkHp,
     respawnIn: s.alive ? 0 : Math.max(0, (s.respawnAt - sim.tick) * DT),
     holdSpawn: s.holdSpawn,
     holdLeft: s.alive ? 0 : Math.max(0, (s.deathTick + RESPAWN_HOLD_MAX_S / DT - sim.tick) * DT),
@@ -59,8 +60,8 @@ export class OfflineSource implements ViewSource {
   private killerId = -1;
   private shipViews = new Map<number, ShipView>();
 
-  constructor(private input: InputSampler, name: string, cls: ClassId, botSkill: BotSkill, bots = 5) {
-    this.sim = new GameSim({ seed: (Math.random() * 1e9) | 0, offline: true, botSkill });
+  constructor(private input: InputSampler, name: string, cls: ClassId, botSkill: BotSkill, arena?: ArenaData, bots = 5) {
+    this.sim = new GameSim({ seed: (Math.random() * 1e9) | 0, offline: true, botSkill, arena });
     const me = this.sim.addPlayer('local', name || 'Pilot', cls);
     this.localId = me.id;
     for (let i = 0; i < bots; i++) this.sim.addBot();
@@ -99,7 +100,8 @@ export class OfflineSource implements ViewSource {
         v = {
           id: s.id, name: s.name, isBot: s.isBot, classId: s.def.id, accent: s.accent, alive: false, gen: 0,
           pos: v3(), rot: q4(), vel: v3(), hullFrac: 1, shieldFrac: 1, power: 0, tierIndex: -1, cloaked: false,
-          shimmer: false, bulwark: false, overdrive: false, spawnProtected: false, boosting: false, isLocal: s.id === this.localId,
+          shimmer: false, bulwark: false, overdrive: false, spawnProtected: false, safe: false, boosting: false,
+          isLocal: s.id === this.localId,
         };
         this.shipViews.set(s.id, v);
       }
@@ -115,6 +117,7 @@ export class OfflineSource implements ViewSource {
       v.bulwark = s.bulwarkHp > 0 && s.abilityActive > 0 && s.def.ability.id === 'bulwark';
       v.overdrive = s.abilityActive > 0 && s.def.ability.id === 'overdrive';
       v.spawnProtected = this.sim.tick < s.spawnProtectedUntil;
+      v.safe = s.safe;
       v.boosting = s.flight.boosting;
       out.push(v);
     }
@@ -154,6 +157,7 @@ export class OfflineSource implements ViewSource {
   match(): MatchView { return matchViewOf(this.sim); }
   drainEvents(): GameEvent[] { const e = this.events; this.events = []; return e; }
   time(): number { return (this.sim.tick + this.alpha) * DT; }
+  envTick(): number { return this.sim.tick - 1 + this.alpha; }
   setClass(c: ClassId): void { this.sim.setClass(this.localId, c); }
   setHold(hold: boolean): void { this.sim.setSpawnHold(this.localId, hold); }
   setPaused(p: boolean): void { this.paused = p; }

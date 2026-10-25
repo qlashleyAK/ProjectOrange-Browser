@@ -1,4 +1,5 @@
-import type { OrangeRegion } from './arena/generate.js';
+import { safeZoneAt, type OrangeRegion } from './arena/generate.js';
+import { moverClearance } from './arena/movers.js';
 import {
   DROP_CAP, DROP_LIFETIME_S, DROP_RING_RADIUS, DT, MAGNET_RADIUS, MAGNET_SPEED, MAX_POWER, PICKUP_RADIUS,
 } from './constants.js';
@@ -74,6 +75,7 @@ export function populate(sim: GameSim): void {
       const b = region.box;
       const p = v3(sim.rng.range(b.min.x, b.max.x), sim.rng.range(b.min.y, b.max.y), sim.rng.range(b.min.z, b.max.z));
       if (!sphereFree(sim.world, p, 1.5)) continue;
+      if (safeZoneAt(sim.arena, p) || moverClearance(sim.arena.sweeps, p) < 4) continue;
       if (sim.shipList.some((s) => s.alive && vdistSq(s.pos, p) < 60 * 60)) continue;
       if (sim.pickups.some((q) => vdistSq(q.pos, p) < 25 * 25)) continue;
       if (sim.arena.spawns.some((sp) => vdistSq(sp.pos, p) < 40 * 40)) continue;

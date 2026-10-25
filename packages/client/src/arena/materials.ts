@@ -9,50 +9,74 @@ float pa_noise(vec3 x) {
              mix(mix(pa_hash(i + vec3(0,0,1)), pa_hash(i + vec3(1,0,1)), f.x), mix(pa_hash(i + vec3(0,1,1)), pa_hash(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 float pa_fbm(vec3 p) { return pa_noise(p) * 0.5 + pa_noise(p * 2.1) * 0.3 + pa_noise(p * 4.7) * 0.2; }
+// fw = noise cycles per pixel; octaves finer than a pixel settle to their mean instead of sparkling
+float pa_noiseAA(vec3 x, float fw) { return mix(pa_noise(x), 0.5, smoothstep(0.25, 0.7, fw)); }
+float pa_fbmAA(vec3 p, float fw) { return pa_noiseAA(p, fw) * 0.5 + pa_noiseAA(p * 2.1, fw * 2.1) * 0.3 + pa_noiseAA(p * 4.7, fw * 4.7) * 0.2; }
 float pa_grid(vec2 uv, float cell, float w) {
+  vec2 px = max(fwidth(uv), vec2(1e-4));
   vec2 f = fract(uv / cell) * cell; vec2 d = min(f, cell - f);
-  return 1.0 - smoothstep(w * 0.5, w, min(d.x, d.y));
+  vec2 ww = max(vec2(w), px);
+  vec2 l = (1.0 - smoothstep(ww * 0.5, ww, d)) * (w / ww) * (1.0 - smoothstep(0.12, 0.35, px / cell));
+  return max(l.x, l.y);
+}
+// box-filtered 50% square wave
+float pa_stripe(float t) {
+  float fw = max(fwidth(t), 1e-4);
+  vec2 e = vec2(t - fw * 0.5, t + fw * 0.5);
+  vec2 i = floor(e) * 0.5 + max(fract(e) - 0.5, 0.0);
+  return clamp((i.y - i.x) / fw, 0.0, 1.0);
 }
 `;
 
 export type ArenaSurface = 'metal' | 'rock' | 'hazard';
 
-export interface ArenaMatOpts { name: string; color: number; surface: ArenaSurface; metal?: number; rough?: number; panel?: number; emissive?: number; emissiveIntensity?: number }
+export interface ArenaMatOpts {
+  name: string; color: number; surface: ArenaSurface; metal?: number; rough?: number; panel?: number; emissive?: number; emissiveIntensity?: number;
+  /** texture in the mesh's own space, so the pattern rides along with moving fixtures */
+  objectSpace?: boolean;
+}
 
-/** World-space triplanar material for static arena geometry (no UVs). */
+/** Triplanar material for arena geometry (no UVs); world-space unless `objectSpace`. */
 export function arenaMaterial(o: ArenaMatOpts): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     name: o.name, color: o.color, metalness: o.metal ?? (o.surface === 'rock' ? 0.05 : 0.55), roughness: o.rough ?? (o.surface === 'rock' ? 0.92 : 0.6),
     emissive: o.emissive ?? 0x000000, emissiveIntensity: o.emissiveIntensity ?? 1,
   });
   const panel = (o.panel ?? 3).toFixed(2);
+  const space = o.objectSpace
+    ? 'vWPos = position;\nvWNormal = normalize(normal);'
+    : 'vWPos = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * normal);';
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * normal);');
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${space}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\n${NOISE}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 an = abs(vWNormal); vec3 tw = an / (an.x + an.y + an.z);
+        vec3 fwp = fwidth(vWPos);
+        float pxw = max(max(fwp.x, fwp.y), fwp.z);
         float detail = 0.0;
         ${o.surface === 'rock' ? `
-          float n1 = pa_fbm(vWPos * 0.12);
-          float n2 = pa_fbm(vWPos * 0.9 + 7.0);
+          float n1 = pa_fbmAA(vWPos * 0.12, pxw * 0.12);
+          float n2 = pa_fbmAA(vWPos * 0.9 + 7.0, pxw * 0.9);
           diffuseColor.rgb *= 0.6 + 0.6 * n1;
           diffuseColor.rgb *= 0.85 + 0.3 * n2;
           float strata = 0.5 + 0.5 * sin(vWPos.y * 0.7 + n1 * 6.0);
           diffuseColor.rgb *= 0.9 + 0.12 * strata;
           detail = n2;
         ` : o.surface === 'hazard' ? `
-          float s = step(0.5, fract((vWPos.x + vWPos.y + vWPos.z) * 0.25));
+          float s = pa_stripe((vWPos.x + vWPos.y + vWPos.z) * 0.25);
           diffuseColor.rgb = mix(vec3(0.02), diffuseColor.rgb, s);
         ` : `
           float gx = pa_grid(vWPos.zy, ${panel}, 0.06), gy = pa_grid(vWPos.xz, ${panel}, 0.06), gz = pa_grid(vWPos.xy, ${panel}, 0.06);
           float lines = gx * tw.x + gy * tw.y + gz * tw.z;
-          vec3 cell = floor(vWPos / ${panel});
-          float tint = pa_hash(cell + vec3(3.0));
+          // leave out the face's own axis: a wall lying exactly on a panel boundary would pick a cell per pixel
+          vec3 dom = step(vec3(max(max(an.x, an.y), an.z)), an);
+          vec3 cell = floor(vWPos * (1.0 - dom) / ${panel});
+          float tint = mix(pa_hash(cell + vec3(3.0)), 0.5, smoothstep(0.1, 0.3, pxw / ${panel}));
           diffuseColor.rgb *= 0.86 + 0.22 * tint;
-          float grime = pa_fbm(vWPos * 0.08) * 0.6 + pa_noise(vWPos * 1.7) * 0.4;
+          float grime = pa_fbm(vWPos * 0.08) * 0.6 + pa_noiseAA(vWPos * 1.7, pxw * 1.7) * 0.4;
           diffuseColor.rgb *= 1.0 - lines * 0.5;
           diffuseColor.rgb *= 0.75 + 0.35 * grime;
           detail = grime;
@@ -62,7 +86,7 @@ export function arenaMaterial(o: ArenaMatOpts): THREE.MeshStandardMaterial {
         roughnessFactor = clamp(roughnessFactor + (detail - 0.5) * 0.3, 0.05, 1.0);
       `);
   };
-  mat.customProgramCacheKey = () => `arena-${o.surface}-${panel}`;
+  mat.customProgramCacheKey = () => `arena-${o.surface}-${panel}${o.objectSpace ? '-obj' : ''}`;
   return mat;
 }
 
@@ -97,12 +121,15 @@ export class ArenaMaterials {
     return this.get(`wall-${t}`, () => arenaMaterial({ name: `wall-${t}`, ...c }));
   }
 
-  prop(m: PropMaterial, emissive?: number): THREE.Material {
+  prop(m: PropMaterial, emissive?: number, moving = false): THREE.Material {
+    const sp = moving ? '-obj' : '';
     switch (m) {
-      case 'metal': return this.get('p-metal', () => arenaMaterial({ name: 'p-metal', color: 0x6b7179, surface: 'metal', panel: 2, metal: 0.7, rough: 0.45 }));
-      case 'darkMetal': return this.get('p-dark', () => arenaMaterial({ name: 'p-dark', color: 0x2e3238, surface: 'metal', panel: 1.5, metal: 0.75, rough: 0.5 }));
-      case 'rock': return this.get('p-rock', () => arenaMaterial({ name: 'p-rock', color: 0x4d5056, surface: 'rock' }));
-      case 'hazard': return this.get('p-hazard', () => arenaMaterial({ name: 'p-hazard', color: 0xc8ff3a, surface: 'hazard', metal: 0.2, rough: 0.6, emissive: 0xc8ff3a, emissiveIntensity: 0.25 }));
+      case 'metal': return this.get(`p-metal${sp}`, () => arenaMaterial({ name: 'p-metal', color: 0x6b7179, surface: 'metal', panel: 2, metal: 0.7, rough: 0.45, objectSpace: moving }));
+      case 'darkMetal': return this.get(`p-dark${sp}`, () => arenaMaterial({ name: 'p-dark', color: 0x2e3238, surface: 'metal', panel: 1.5, metal: 0.75, rough: 0.5, objectSpace: moving }));
+      case 'rock': return this.get(`p-rock${sp}`, () => arenaMaterial({ name: 'p-rock', color: 0x4d5056, surface: 'rock', objectSpace: moving }));
+      case 'hazard': return this.get(`p-hazard${sp}`, () => arenaMaterial({
+        name: 'p-hazard', color: 0xc8ff3a, surface: 'hazard', metal: 0.2, rough: 0.6, emissive: 0xc8ff3a, emissiveIntensity: 0.25, objectSpace: moving,
+      }));
       case 'crystal': return this.get(`p-crystal-${emissive ?? 0x9a6bff}`, () => new THREE.MeshStandardMaterial({
         name: 'p-crystal', color: emissive ?? 0x9a6bff, metalness: 0.1, roughness: 0.15, emissive: emissive ?? 0x9a6bff, emissiveIntensity: 2.2,
         flatShading: true,

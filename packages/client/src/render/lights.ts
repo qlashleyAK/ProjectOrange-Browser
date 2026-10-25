@@ -31,6 +31,12 @@ export class LightRig {
     }
   }
 
+  /** Point the rig at a different map's room lights. */
+  setArena(arena: ArenaView, adjacency: Map<string, { room: string; tunnel: string }[]>, tunnelRooms: Map<string, [string, string]>): void {
+    this.arena = arena; this.adjacency = adjacency; this.tunnelRooms = tunnelRooms;
+    this.lastPlace = undefined;
+  }
+
   updateStatic(place: string | null, camPos: THREE.Vector3): void {
     if (place === this.lastPlace) return;
     this.lastPlace = place;

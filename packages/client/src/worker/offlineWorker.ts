@@ -7,11 +7,11 @@ let room: GameRoom | null = null;
 let link: ClientLink | null = null;
 
 self.onmessage = async (e: MessageEvent) => {
-  const m = e.data as { t: 'init'; botSkill: BotSkill } | { t: 'msg'; d: ArrayBuffer | string };
+  const m = e.data as { t: 'init'; botSkill: BotSkill; arena?: string } | { t: 'msg'; d: ArrayBuffer | string };
   if (m.t === 'init') {
     try {
       await initPhysics();
-      room = new GameRoom({ id: 'OFFLINE', offline: true, botSkill: m.botSkill });
+      room = new GameRoom({ id: 'OFFLINE', offline: true, botSkill: m.botSkill, arena: m.arena });
       link = {
         send: (data) => {
           if (typeof data === 'string') self.postMessage({ t: 'msg', d: data });

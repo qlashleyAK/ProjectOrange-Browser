@@ -21,7 +21,7 @@ export function activateRepel(sim: GameSim, s: Ship): boolean {
   type Cand = { d: number; apply: () => void };
   const cands: Cand[] = [];
   for (const o of sim.shipList) {
-    if (o.id === s.id || !o.alive || sim.tick < o.spawnProtectedUntil || !o.body) continue;
+    if (o.id === s.id || !o.alive || sim.tick < o.spawnProtectedUntil || o.safe || !o.body) continue;
     const d = vdist(o.pos, s.pos);
     if (d >= REPEL_RADIUS) continue;
     cands.push({

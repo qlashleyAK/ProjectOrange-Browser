@@ -1,5 +1,6 @@
 import type * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
 import type { ArenaData } from '../arena/generate.js';
+import { moverClearance, segmentClearOfMovers, type Sweep } from '../arena/movers.js';
 import { v3, vdist, vnorm, type V3 } from '../math.js';
 import { lineOfSight, sphereCastStatic, sphereFree } from '../physicsWorld.js';
 
@@ -9,13 +10,15 @@ const CLEAR_R = 5;
 
 export class NavGraph {
   nodes: NavNode[] = [];
+  private sweeps: Sweep[];
 
   constructor(private world: RAPIER.World, arena: ArenaData) {
+    this.sweeps = arena.sweeps;
     this.build(arena);
   }
 
   private add(pos: V3, place: string, requireFree = true): number {
-    if (requireFree && !sphereFree(this.world, pos, CLEAR_R)) return -1;
+    if (requireFree && (!sphereFree(this.world, pos, CLEAR_R) || moverClearance(this.sweeps, pos) < CLEAR_R + 2)) return -1;
     const id = this.nodes.length;
     this.nodes.push({ id, pos, place, links: [] });
     return id;
@@ -30,7 +33,7 @@ export class NavGraph {
     const d = vdist(a, b);
     if (d < 1e-3) return true;
     const dir = vnorm(v3(), v3(b.x - a.x, b.y - a.y, b.z - a.z));
-    return sphereCastStatic(this.world, a, dir, CLEAR_R - 1, d) < 0;
+    return sphereCastStatic(this.world, a, dir, CLEAR_R - 1, d) < 0 && segmentClearOfMovers(this.sweeps, a, b, CLEAR_R);
   }
 
   private build(arena: ArenaData): void {

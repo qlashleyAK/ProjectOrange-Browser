@@ -43,7 +43,7 @@ describe('snapshot codec', () => {
         id: 3, gen: 7, cls: 2, lastSeq: 999, pos: v3(1.5, -2.25, 300.125), rot: qfromAxisAngle(q4(), v3(0, 1, 0), 0.3), vel: v3(10, 0, -5), angvel: v3(0.1, 0.2, 0.3),
         flight: { ...newFlightState(), boostMeter: 0.123456789 }, energy: 55.5, ammo: 3, abilityCooldown: 4, abilityActive: 1, repelCooldown: 0,
         power: 6, hull: 80, shield: 20, maxShield: 103.5, lockTarget: -1, lockProgress: 0, locked: false, lockWarn: 1, missileWarn: 2,
-        bulwarkHp: 0, primaryLastFire: 123400, muzzleIndex: 5, spawnProtectedUntil: 0, cloaked: false,
+        bulwarkHp: 0, primaryLastFire: 123400, muzzleIndex: 5, spawnProtectedUntil: 0, cloaked: false, safeCharge: 6.5,
       },
       ships: [{ id: 1, gen: 2, cls: 3, pos: v3(-100.001, 50, 20), rot: qfromAxisAngle(q4(), v3(1, 0, 0), 1), vel: v3(70, -3, 2), angvel: v3(1, 2, -3), boost: 0.5, flags: 9, hull: 0.5, shield: 1, power: 4 }],
       missiles: [{ id: 77, pos: v3(1, 2, 3), vel: v3(140, 0, 0) }],

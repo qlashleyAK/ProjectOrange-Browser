@@ -25,6 +25,8 @@ export interface ShipView {
   bulwark: boolean;
   overdrive: boolean;
   spawnProtected: boolean;
+  /** inside a safe zone with charge left */
+  safe: boolean;
   boosting: boolean;
   isLocal: boolean;
 }
@@ -53,6 +55,11 @@ export interface LocalState {
   lockWarn: number;
   missileWarn: number;
   spawnProtected: boolean;
+  /** protected by a safe zone (weapons offline) */
+  safe: boolean;
+  /** seconds of safe-zone protection left */
+  safeCharge: number;
+  inSafeZone: boolean;
   cloaked: boolean;
   bulwarkHp: number;
   /** seconds until respawn is allowed (<=0 means ready / alive) */
@@ -74,8 +81,9 @@ export interface NetStats { ping: number; loss: number; jitter: number; interpDe
 
 export interface ViewSource {
   readonly online: boolean;
+  /** can change when the server welcomes us into a room running a different map */
   readonly arena: ArenaData;
-  /** physics world containing static arena geometry (camera collision, effects raycasts) */
+  /** physics world containing the arena geometry (camera collision, effects raycasts) */
   readonly world: RAPIER.World;
   /** advance by real elapsed seconds */
   update(dt: number): void;
@@ -89,6 +97,8 @@ export interface ViewSource {
   drainEvents(): GameEvent[];
   /** simulation time in seconds, for animation */
   time(): number;
+  /** fractional tick that moving arena fixtures are posed at, matching the local ship's timeline */
+  envTick(): number;
   setClass(c: ClassId): void;
   setHold(hold: boolean): void;
   setPaused(p: boolean): void;

@@ -12,6 +12,9 @@ const plumeGeo = (() => {
   return g;
 })();
 
+const SPAWN_BUBBLE = new THREE.Color(0.5, 0.8, 1.0);
+const SAFE_BUBBLE = new THREE.Color(0.43, 1.0, 0.79);
+
 function bulwarkMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -194,9 +197,13 @@ export class ShipRenderer {
       bm.uniforms.uRipple!.value = Math.max(0, bm.uniforms.uRipple!.value - dt * 3);
       e.wasBulwark = v.bulwark;
 
-      // spawn protection bubble
-      e.bubble.visible = v.spawnProtected;
-      if (v.spawnProtected) (e.bubble.material as THREE.MeshBasicMaterial).opacity = 0.06 + 0.04 * Math.sin(t * 10);
+      // spawn protection bubble; mint while sheltered by a safe zone
+      e.bubble.visible = v.spawnProtected || v.safe;
+      if (e.bubble.visible) {
+        const bm = e.bubble.material as THREE.MeshBasicMaterial;
+        bm.opacity = v.safe ? 0.1 + 0.04 * Math.sin(t * 4) : 0.06 + 0.04 * Math.sin(t * 10);
+        bm.color.copy(v.safe ? SAFE_BUBBLE : SPAWN_BUBBLE);
+      }
 
       // low hull: sparks + smoke trail
       if (v.hullFrac < 0.25 && !v.shimmer) {

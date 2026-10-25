@@ -53,6 +53,9 @@ export interface Ship {
   secondaryHeld: boolean;
 
   spawnProtectedUntil: number;
+  /** inside a safe zone with charge left: untouchable, but weapons and abilities are offline */
+  safe: boolean;
+  safeCharge: number;
   deathTick: number;
   respawnAt: number;
   holdSpawn: boolean;

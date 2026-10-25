@@ -27,6 +27,8 @@ export interface Settings {
   lastClass: 'dart' | 'mule' | 'scythe' | 'brute';
   firstVisit: boolean;
   thirdPerson: boolean;
+  /** map for practice, new private rooms and quick play */
+  arena: string;
 }
 
 const DEFAULTS: Settings = {
@@ -55,6 +57,7 @@ const DEFAULTS: Settings = {
   lastClass: 'dart',
   firstVisit: true,
   thirdPerson: true,
+  arena: 'hollowdeep',
 };
 
 const KEY = 'orange.settings.v1';
