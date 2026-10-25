@@ -6,6 +6,7 @@ import type { GameSim } from '../game.js';
 import { DEG, qrot, v3, vdot, vlen, vnorm, type Q4, type V3 } from '../math.js';
 import { lineOfSight } from '../physicsWorld.js';
 import type { TierEffect } from '../power.js';
+import { HASTE_CADENCE, QUAD_DAMAGE } from '../powerups.js';
 import { hash32 } from '../rng.js';
 
 export const OVERDRIVE_CADENCE = 1.35;
@@ -126,9 +127,15 @@ export function shotIdFor(shipId: number, seq: number, slot: number): number {
   return hash32(shipId, seq, slot) & 0x7fffffff;
 }
 
+/** Primary cadence multiplier from tier, overdrive and haste (shared by sim and client prediction). */
+export function primaryCadence(tier: TierEffect, overdrive: boolean, haste: boolean): number {
+  return tier.cadence * (overdrive ? OVERDRIVE_CADENCE : 1) * (haste ? HASTE_CADENCE : 1);
+}
+
 export function canFirePrimary(sim: GameSim, s: Ship, w: PrimaryDef): boolean {
-  const cad = s.tier.cadence * (s.def.ability.id === 'overdrive' && s.abilityActive > 0 ? OVERDRIVE_CADENCE : 1);
-  return sim.tick - s.primaryLastFire >= cadenceTicks(w, cad) && s.energy >= w.energy;
+  const haste = s.powerup === 'haste';
+  const cad = primaryCadence(s.tier, s.def.ability.id === 'overdrive' && s.abilityActive > 0, haste);
+  return sim.tick - s.primaryLastFire >= cadenceTicks(w, cad) && (haste || s.energy >= w.energy);
 }
 
 export function firePrimary(sim: GameSim, s: Ship): boolean {
@@ -136,7 +143,7 @@ export function firePrimary(sim: GameSim, s: Ship): boolean {
   if (!canFirePrimary(sim, s, w)) return false;
   const count = projectileCount(w, s.def, s.tier);
   if (sim.liveProjectilesOf(s.id) + count > PROJECTILE_CAP_PER_SHIP) return false;
-  s.energy -= w.energy;
+  if (s.powerup !== 'haste') s.energy -= w.energy;
   s.primaryLastFire = sim.tick;
   const shotId = shotIdFor(s.id, s.input.seq, 0);
   const shots = volleyShots(s.def, w, count, s.pos, s.rot, s.muzzleIndex, shotId);
@@ -146,7 +153,7 @@ export function firePrimary(sim: GameSim, s: Ship): boolean {
     applyPrimarySeek(sim.world, w, shots, candidates);
   }
   if (w.muzzle === 'alternate') s.muzzleIndex++;
-  let mult = s.tier.damage;
+  let mult = s.tier.damage * (s.powerup === 'quad' ? QUAD_DAMAGE : 1);
   if (s.ambushReady) { mult *= 1.5; s.ambushReady = false; }
   if (s.cloaked) sim.breakCloak(s);
   s.lastFireTick = sim.tick;

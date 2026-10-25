@@ -1,6 +1,6 @@
 import * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
 import { boxRotation, type Mover, type Prop } from './arena/blueprint.js';
-import { crystalPoints, pillarPoints, rockPoints, spikePoints } from './arena/shapes.js';
+import { crystalPoints, limbCapsules, logStaves, pillarPoints, rockPoints, spikePoints, type Capsule } from './arena/shapes.js';
 import { boxContains, boxDistance, doorClearanceBox, getA, type ArenaData, type Axis } from './arena/generate.js';
 import { moverPose, posedSpheres } from './arena/movers.js';
 import type { ShipClassDef } from './classes/types.js';
@@ -39,9 +39,20 @@ export function createWorld(): RAPIER.World {
   return world;
 }
 
-/** Collider for a colliding prop, placed at `p.center - origin` (body space), or null for visual-only props. */
-function propCollider(p: Prop, origin: V3): RAPIER.ColliderDesc | null {
-  if (!p.collides) return null;
+const finish = (d: RAPIER.ColliderDesc, x: number, y: number, z: number, rot: Q4) => d.setTranslation(x, y, z).setRotation(rot)
+  .setFriction(ARENA_FRICTION).setCollisionGroups(STATIC_GROUPS).setSolverGroups(STATIC_GROUPS);
+function capsuleDescs(caps: Capsule[], origin: V3): RAPIER.ColliderDesc[] {
+  return caps.map((c) => {
+    const dir = v3(c.b.x - c.a.x, c.b.y - c.a.y, c.b.z - c.a.z), len = Math.hypot(dir.x, dir.y, dir.z);
+    const rot = qfromTo(q4(), Y_UP, vnorm(dir, dir));
+    return finish(RAPIER.ColliderDesc.capsule(len / 2, c.r),
+      (c.a.x + c.b.x) / 2 - origin.x, (c.a.y + c.b.y) / 2 - origin.y, (c.a.z + c.b.z) / 2 - origin.z, rot);
+  });
+}
+
+/** Colliders for a colliding prop, placed relative to `origin` (body space); none for visual-only props. */
+function propColliders(p: Prop, origin: V3): RAPIER.ColliderDesc[] {
+  if (!p.collides) return [];
   let d: RAPIER.ColliderDesc | null = null;
   const rot = q4();
   switch (p.kind) {
@@ -69,10 +80,14 @@ function propCollider(p: Prop, origin: V3): RAPIER.ColliderDesc | null {
       break;
     case 'ring':
       break;
+    case 'hull':
+      d = RAPIER.ColliderDesc.convexHull(new Float32Array(p.points));
+      break;
+    case 'limb': return capsuleDescs(limbCapsules(p.points, p.radii), origin);
+    case 'log': return capsuleDescs(logStaves(p.center, p.dir, p.length, p.outer, p.inner), origin);
   }
-  if (!d) return null;
-  return d.setTranslation(p.center.x - origin.x, p.center.y - origin.y, p.center.z - origin.z).setRotation(rot)
-    .setFriction(ARENA_FRICTION).setCollisionGroups(STATIC_GROUPS).setSolverGroups(STATIC_GROUPS);
+  if (!d) return [];
+  return [finish(d, p.center.x - origin.x, p.center.y - origin.y, p.center.z - origin.z, rot)];
 }
 
 const ORIGIN = v3();
@@ -86,10 +101,7 @@ export function addArenaColliders(world: RAPIER.World, arena: ArenaData): RAPIER
       .setFriction(ARENA_FRICTION).setCollisionGroups(STATIC_GROUPS).setSolverGroups(STATIC_GROUPS);
     world.createCollider(d, body);
   }
-  for (const p of arena.blueprint.props) {
-    const d = propCollider(p, ORIGIN);
-    if (d) world.createCollider(d, body);
-  }
+  for (const p of arena.blueprint.props) for (const d of propColliders(p, ORIGIN)) world.createCollider(d, body);
   return body;
 }
 
@@ -104,10 +116,7 @@ export function addMovers(world: RAPIER.World, arena: ArenaData, tick: number): 
   return arena.movers.map((m) => {
     moverPose(m, tick, pos, rot);
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pos.x, pos.y, pos.z).setRotation(rot));
-    for (const p of m.parts) {
-      const d = propCollider(p, m.origin);
-      if (d) world.createCollider(d, body);
-    }
+    for (const p of m.parts) for (const d of propColliders(p, m.origin)) world.createCollider(d, body);
     return { def: m, body };
   });
 }
@@ -230,7 +239,7 @@ export function finalizeSpawns(world: RAPIER.World, arena: ArenaData): string[] 
       }
     }
     if (!ok) errors.push(`spawn in ${s.room} has no 12 m clearance`);
-    s.facing = vnorm(v3(), v3(room.center.x - s.pos.x, 0, room.center.z - s.pos.z));
+    s.facing = s.aimed ? vnorm(v3(), s.facing) : vnorm(v3(), v3(room.center.x - s.pos.x, 0, room.center.z - s.pos.z));
   }
   return errors;
 }

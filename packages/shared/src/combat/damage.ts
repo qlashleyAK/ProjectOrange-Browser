@@ -2,6 +2,7 @@ import type { Ship } from '../entities.js';
 import type { GameSim } from '../game.js';
 import { lineOfSight } from '../physicsWorld.js';
 import { v3, type V3 } from '../math.js';
+import { REFLECT_MULT } from '../powerups.js';
 import { pointToShipDistance } from './hitVolumes.js';
 
 export interface DamageResult { shield: number; hull: number; killed: boolean }
@@ -16,6 +17,8 @@ export function applyDamage(sim: GameSim, target: Ship, amount: number, attacker
   if (!sim.damageEnabled()) return res;
   if (sim.tick < target.spawnProtectedUntil || target.safe) return res;
   if (attackerId === target.id) return res; // no self-damage
+  // read before the hit: dying clears it. Reflected damage never reflects again.
+  const reflect = target.powerup === 'reflect' && weapon !== 'reflect';
   let rem = amount;
   if (target.shield > 0) {
     res.shield = Math.min(target.shield, rem);
@@ -38,6 +41,10 @@ export function applyDamage(sim: GameSim, target: Ship, amount: number, attacker
   if (target.hull <= 0) {
     res.killed = true;
     sim.killShip(target, attackerId, weapon);
+  }
+  const dealt = res.shield + res.hull;
+  if (reflect && attacker && attacker !== target && dealt > 0) {
+    applyDamage(sim, attacker, dealt * REFLECT_MULT, target.id, 'reflect', v3(attacker.pos.x, attacker.pos.y, attacker.pos.z));
   }
   return res;
 }

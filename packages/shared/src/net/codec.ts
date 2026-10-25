@@ -106,6 +106,7 @@ export function encodePong(clientTime: number, serverTick: number, sinceTick: nu
 export const enum ShipFlag {
   Cloaked = 1, Bulwark = 2, Overdrive = 4, SpawnProtected = 8, AssistOn = 16, Boosting = 32, Sweeping = 64, DodgeRoll = 128,
   Locking = 256, Shimmer = 512, Safe = 1024,
+  // bits 11-13 carry the powerup kind (powerupFlags)
 }
 
 export interface ShipSnap {
@@ -122,6 +123,8 @@ export interface OwnerSnap {
   lockTarget: number; lockProgress: number; locked: boolean; lockWarn: number; missileWarn: number;
   bulwarkHp: number; primaryLastFire: number; muzzleIndex: number; spawnProtectedUntil: number; cloaked: boolean;
   safeCharge: number;
+  /** powerupIndex of the held powerup, and seconds left on it */
+  powerup: number; powerupLeft: number;
 }
 
 export interface MissileSnap { id: number; pos: V3; vel: V3 }
@@ -153,7 +156,7 @@ export function encodeSnapshot(s: Snapshot, w = new Writer(2048)): Uint8Array {
     w.u8(o.power); w.f32(o.hull); w.f32(o.shield); w.f32(o.maxShield);
     w.u8(o.lockTarget < 0 ? 255 : o.lockTarget); w.f32(o.lockProgress); w.u8(o.locked ? 1 : 0); w.u8(o.lockWarn); w.u8(o.missileWarn);
     w.f32(o.bulwarkHp); w.u32(o.primaryLastFire); w.u16(o.muzzleIndex); w.u32(o.spawnProtectedUntil); w.u8(o.cloaked ? 1 : 0);
-    w.f32(o.safeCharge);
+    w.f32(o.safeCharge); w.u8(o.powerup); w.f32(o.powerupLeft);
   }
   w.u8(s.ships.length);
   for (const sh of s.ships) {
@@ -186,11 +189,11 @@ export function decodeSnapshot(r: Reader): Snapshot {
     const power = r.u8(), hull = r.f32(), shield = r.f32(), maxShield = r.f32();
     const lt = r.u8(), lockProgress = r.f32(), locked = r.u8() === 1, lockWarn = r.u8(), missileWarn = r.u8();
     const bulwarkHp = r.f32(), primaryLastFire = r.u32(), muzzleIndex = r.u16(), spawnProtectedUntil = r.u32(), cloaked = r.u8() === 1;
-    const safeCharge = r.f32();
+    const safeCharge = r.f32(), powerup = r.u8(), powerupLeft = r.f32();
     owner = {
       id, gen, cls, lastSeq, pos, rot, vel, angvel, flight, energy, ammo, abilityCooldown, abilityActive, repelCooldown,
       power, hull, shield, maxShield, lockTarget: lt === 255 ? -1 : lt, lockProgress, locked, lockWarn, missileWarn,
-      bulwarkHp, primaryLastFire, muzzleIndex, spawnProtectedUntil, cloaked, safeCharge,
+      bulwarkHp, primaryLastFire, muzzleIndex, spawnProtectedUntil, cloaked, safeCharge, powerup, powerupLeft,
     };
   }
   const ships: ShipSnap[] = [];

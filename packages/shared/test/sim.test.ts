@@ -45,7 +45,7 @@ describe('map rotation', () => {
     const sim = new GameSim({ arena: arenaById('hollowdeep'), offline: true, seed: 7, nextArena: nextInRotation });
     for (let i = 0; i < 4; i++) sim.addBot();
     const seen: string[] = [];
-    for (const expected of ['gyre', 'tower', 'hollowdeep']) {
+    for (const expected of ['gyre', 'tower', 'forest', 'hollowdeep']) {
       expect(sim.upcomingArena().blueprint.id).toBe(expected);
       sim.forceInProgress();
       sim.match.phaseEndTick = sim.tick + 1;
@@ -62,7 +62,7 @@ describe('map rotation', () => {
       for (let i = 0; i < 600; i++) sim.step();
       for (const s of sim.shipList) if (s.alive) expect(Number.isFinite(s.pos.x + s.pos.y + s.pos.z)).toBe(true);
     }
-    expect(seen).toEqual(['gyre', 'tower', 'hollowdeep']);
+    expect(seen).toEqual(['gyre', 'tower', 'forest', 'hollowdeep']);
   }, 120_000);
 
   it('stays put without a rotation', () => {

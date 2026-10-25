@@ -1,15 +1,15 @@
 import {
   BUILD_VERSION, castStatic, CLASS_LIST, classByIndex, DT, encodeInputPacket, encodePing, END_REASONS, INPUT_SEND_HZ,
   INPUT_BUFFER_TARGET_MAX, MAX_INPUTS_PER_PACKET, MsgType, PRIMARY_TABLE, quantizeInput, Reader, decodeSnapshot, resolveTier,
-  RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, safeZoneAt, ShipFlag, TIME_DILATION, activePrimary, v3, q4,
-  type ArenaData, type ClassId, type ClientMsg, type GameEvent, type InputCmd, type MatchPhase, type OwnerSnap,
-  type PickupInfo, type PrimaryDef, type Q4, type RAPIER, type RosterEntry, type ServerMsg, type ShipSnap, type Snapshot, type V3,
+  RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, safeZoneAt, ShipFlag, TIME_DILATION, activePrimary, powerupFromFlags, v3, q4,
+  type ArenaData, type ClassId, type ClientMsg, type GameEvent, type InputCmd, type MatchPhase, type OwnerSnap, type PickupInfo,
+  type PowerupInfo, type PrimaryDef, type Q4, type RAPIER, type RosterEntry, type ServerMsg, type ShipSnap, type Snapshot, type V3,
 } from '@orange/shared';
 import { ClockSync } from '../net/clock';
 import { InterpBuffer } from '../net/interp';
 import { Predictor, type PredictedVolley } from '../net/prediction';
 import type { Transport } from '../net/transport';
-import type { LocalState, MatchView, MissileView, NetStats, PickupView, ProjView, ShipView, ViewSource } from '../view';
+import type { LocalState, MatchView, MissileView, NetStats, PickupView, PowerupView, ProjView, ShipView, ViewSource } from '../view';
 import type { InputSampler } from './offline';
 
 export type NetStatus = 'connecting' | 'live' | 'reconnecting' | 'lost' | 'full' | 'reload';
@@ -71,6 +71,7 @@ export class OnlineSource implements ViewSource {
   private cosmetic: CosmeticProj[] = [];
   private missilesById = new Map<number, RemoteMissile>();
   private pickupMap = new Map<number, PickupInfo>();
+  private powerupState: PowerupInfo = { live: null, next: null };
   private rosterList: RosterEntry[] = [];
   private matchState = { phase: 'waiting' as MatchPhase, phaseEndTick: 0, winnerId: -1, startTick: 0 };
   private nextArena: string | null = null;
@@ -116,6 +117,7 @@ export class OnlineSource implements ViewSource {
     this.remoteProj.clear();
     this.missilesById.clear();
     this.pickupMap.clear();
+    this.powerupState = { live: null, next: null };
     this.queued = [];
   }
 
@@ -179,6 +181,7 @@ export class OnlineSource implements ViewSource {
       case 'pickups':
         this.pickupMap.clear();
         for (const p of m.list) this.pickupMap.set(p.id, p);
+        if (m.powerup) this.powerupState = m.powerup;
         break;
       case 'ev':
         for (const e of m.list) {
@@ -201,7 +204,7 @@ export class OnlineSource implements ViewSource {
     switch (e.t) {
       case 'hit': return e.targetId === me || e.attackerId === me;
       case 'death': return e.victimId === me || e.killerId === me;
-      case 'pickupTake': return e.shipId === me;
+      case 'pickupTake': case 'powerupTake': case 'powerupEnd': return e.shipId === me;
       case 'tier': case 'ability': case 'dodge': case 'repel': case 'sweep': case 'bulwarkHit': case 'spawn': case 'scrape':
         return e.shipId === me;
       case 'lockOn': return e.targetId === me || e.shipId === me;
@@ -225,6 +228,9 @@ export class OnlineSource implements ViewSource {
         this.pickupMap.set(e.id, { id: e.id, pos: e.pos, units: e.units, drop: e.drop, expireTick: e.expireTick, killerId: e.killerId });
         break;
       case 'pickupTake': case 'pickupExpire': this.pickupMap.delete(e.id); break;
+      case 'powerupSpawn': this.powerupState = { live: { id: e.id, kind: e.kind, pos: e.pos }, next: null }; break;
+      case 'powerupTake': this.powerupState = { live: null, next: { tick: e.nextTick, pos: e.nextPos } }; break;
+      case 'powerupClear': this.powerupState = { live: null, next: null }; break;
       case 'phase':
         if (e.phase === 'inProgress') this.matchState.startTick = tick;
         this.matchState.phase = e.phase;
@@ -429,6 +435,7 @@ export class OnlineSource implements ViewSource {
       v.spawnProtected = (sh.flags & ShipFlag.SpawnProtected) !== 0;
       v.safe = (sh.flags & ShipFlag.Safe) !== 0;
       v.boosting = (sh.flags & ShipFlag.Boosting) !== 0;
+      v.powerup = powerupFromFlags(sh.flags);
     }
   }
 
@@ -445,7 +452,7 @@ export class OnlineSource implements ViewSource {
     return {
       id, name: '', isBot: false, classId: 'dart', accent: 0, alive: false, gen: 0, pos: v3(), rot: q4(), vel: v3(),
       hullFrac: 1, shieldFrac: 1, power: 0, tierIndex: -1, cloaked: false, shimmer: false, bulwark: false, overdrive: false,
-      spawnProtected: false, safe: false, boosting: false, isLocal,
+      spawnProtected: false, safe: false, boosting: false, isLocal, powerup: null,
     };
   }
 
@@ -469,6 +476,7 @@ export class OnlineSource implements ViewSource {
       v.spawnProtected = this.ownerTick < o.spawnProtectedUntil;
       v.safe = this.predictor.safe;
       v.boosting = this.predictor.flight.boosting;
+      v.powerup = this.predictor.powerup;
       out.push(v);
     }
     return out;
@@ -500,6 +508,7 @@ export class OnlineSource implements ViewSource {
       holdSpawn: this.holdSpawn,
       holdLeft: alive ? 0 : Math.max(0, (dead + RESPAWN_HOLD_MAX_S / DT - this.serverNow) * DT),
       killerId: this.killerId, primary: activePrimary(def, tier), secondary: def.secondary,
+      powerup: alive ? this.predictor.powerup : null, powerupLeft: alive ? this.predictor.powerupLeft : 0,
     };
   }
 
@@ -557,6 +566,11 @@ export class OnlineSource implements ViewSource {
       out.push({ id: p.id, pos: p.pos, units: p.units, drop: p.drop, expireIn: (p.expireTick - this.serverNow) * DT, killerId: p.killerId });
     }
     return out;
+  }
+
+  powerup(): PowerupView {
+    const { live, next } = this.powerupState;
+    return { live, next: next ? { pos: next.pos, in: Math.max(0, (next.tick - this.serverNow) * DT) } : null };
   }
 
   roster(): RosterEntry[] { return this.rosterList; }

@@ -1,6 +1,7 @@
 import type { ClassId } from '../classes/types.js';
 import type { GameEvent, MatchPhase } from '../entities.js';
 import type { V3 } from '../math.js';
+import type { PowerupKind } from '../powerups.js';
 
 export interface RosterEntry {
   id: number; name: string; isBot: boolean; classId: ClassId; accent: number;
@@ -10,6 +11,8 @@ export interface RosterEntry {
 }
 
 export interface PickupInfo { id: number; pos: V3; units: number; drop: boolean; expireTick: number; killerId: number }
+/** the live powerup, else when and where the next appears (null outside a match) */
+export interface PowerupInfo { live: { id: number; kind: PowerupKind; pos: V3 } | null; next: { tick: number; pos: V3 } | null }
 
 export type ClientMsg =
   | { t: 'hello'; name: string; classId: ClassId; version: string; token?: string }
@@ -23,6 +26,6 @@ export type ServerMsg =
   | { t: 'roster'; players: RosterEntry[] }
   /** `arena` is the map being played (it changes between matches); `nextArena` the one after it */
   | { t: 'match'; phase: MatchPhase; phaseEndTick: number; winnerId: number; tick: number; arena: string; nextArena: string }
-  | { t: 'pickups'; list: PickupInfo[] }
+  | { t: 'pickups'; list: PickupInfo[]; powerup: PowerupInfo }
   | { t: 'ev'; tick: number; list: GameEvent[] }
   | { t: 'vanish'; shipId: number };

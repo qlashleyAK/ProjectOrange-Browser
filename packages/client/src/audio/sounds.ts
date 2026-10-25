@@ -8,7 +8,7 @@ export type SoundName =
   | 'shieldHit' | 'hullHit' | 'worldPing' | 'pickup' | 'tierUp' | 'tierDown' | 'dropTinkle'
   | 'repel' | 'overdrive' | 'sweep' | 'cloakOn' | 'cloakOff' | 'bulwarkUp' | 'bulwarkAbsorb' | 'bulwarkBreak'
   | 'lockBeep' | 'lockSolid' | 'missileAlarm' | 'scrape' | 'click' | 'beep' | 'go' | 'dodge' | 'spawn' | 'whir'
-  | 'hitMarker' | 'killConfirm' | 'death';
+  | 'hitMarker' | 'killConfirm' | 'death' | 'powerup' | 'powerupSpawn' | 'powerdown' | 'reflectZap';
 
 /** Renders every SFX buffer; ~100 ms total. */
 export function renderSounds(): Record<SoundName, Float32Array> {
@@ -138,6 +138,25 @@ export function renderSounds(): Record<SoundName, Float32Array> {
   s.hitMarker = normalize(osc(0.05, () => 2600, 'sine', expDecay(80)), 0.35);
   s.killConfirm = normalize(mix(osc(0.25, () => 880, 'tri', expDecay(10)), [osc(0.25, () => 1320, 'tri', expDecay(10)), 0.8, 0.07]), 0.55);
   s.death = normalize(mix(osc(1.2, (t) => 300 * Math.exp(-t * 2), 'saw', expDecay(2), 0.4), [lowpass(noiseBurst(1.2, expDecay(2.5)), 900), 0.8]), 0.7);
+  s.powerup = normalize(softClip(mix(
+    osc(1.1, (t) => 70 + t * 60, 'saw', adsr(0.01, 0.3, 0.5, 0.6, 1.1), 0.5),
+    ...([440, 554.37, 659.25, 880, 1108.7] as const).map((f, i) => [mix(osc(0.9, () => f, 'square', adsr(0.005, 0.1, 0.35, 0.5, 0.9), 0.18), bell(1, f * 2, 4)), 0.55, i * 0.06] as [Float32Array, number, number]),
+    [highpass(noiseBurst(0.8, adsr(0.2, 0.2, 0.4, 0.4, 0.8)), 4000), 0.25],
+  ), 1.4), 0.85);
+  s.powerupSpawn = normalize(mix(
+    bell(2.4, 196, 1.6, [[1, 1], [2.01, 0.5], [3.02, 0.35], [4.2, 0.2]]),
+    ...[0, 0.1, 0.2, 0.3].map((o, i) => [osc(1.2, (t) => (600 + i * 200) * (1 + t * 0.8), 'sine', adsr(0.05, 0.2, 0.4, 0.6, 1.2)), 0.2, o] as [Float32Array, number, number]),
+    [highpass(noiseBurst(1.4, adsr(0.4, 0.3, 0.3, 0.6, 1.4)), 5000), 0.15],
+  ), 0.7);
+  s.powerdown = normalize(mix(
+    osc(0.9, (t) => 900 * Math.exp(-t * 2.2) + 80, 'saw', adsr(0.01, 0.2, 0.5, 0.5, 0.9), 0.4),
+    [osc(0.9, (t) => 450 * Math.exp(-t * 2.2) + 40, 'sine', expDecay(3)), 0.6],
+  ), 0.6);
+  s.reflectZap = normalize(mix(
+    highpass(noiseBurst(0.22, (t) => expDecay(14)(t) * (0.5 + 0.5 * Math.sign(Math.sin(t * 2 * Math.PI * 70)))), 1800),
+    [osc(0.25, (t) => 1800 - t * 4000, 'square', expDecay(16), 0.4), 0.5],
+    [bell(0.3, 2600, 12), 0.4],
+  ), 0.65);
   return s;
 }
 
@@ -202,8 +221,8 @@ export function renderMenuMusic(): [Float32Array, Float32Array] {
 }
 
 // ------------------------------------------------------------------ ambience & reverbs
-export type AmbienceId = 'hub' | 'foundry' | 'dock' | 'reactor' | 'gallery' | 'crusher' | 'tunnel' | 'wind';
-export const AMBIENCES: AmbienceId[] = ['hub', 'foundry', 'dock', 'reactor', 'gallery', 'crusher', 'tunnel', 'wind'];
+export type AmbienceId = 'hub' | 'foundry' | 'dock' | 'reactor' | 'gallery' | 'crusher' | 'tunnel' | 'wind' | 'forest';
+export const AMBIENCES: AmbienceId[] = ['hub', 'foundry', 'dock', 'reactor', 'gallery', 'crusher', 'tunnel', 'wind', 'forest'];
 
 export function renderAmbience(id: AmbienceId): Float32Array {
   const len = 6;
@@ -240,13 +259,31 @@ export function renderAmbience(id: AmbienceId): Float32Array {
       const howl = bandpass(noiseBurst(len, gust), (t) => 420 + 160 * Math.sin((t / len) * Math.PI * 4), 1.2);
       return normalize(mix(howl, [lowpass(noiseBurst(len, () => 1), 140), 0.5]), 0.3);
     }
+    case 'forest': {
+      // an 18 s loop so the owl isn't on every bar; every period divides the loop length
+      const L = 18;
+      const sway = (t: number) => 0.5 + 0.3 * Math.sin((t / L) * Math.PI * 2 * 2) + 0.2 * Math.sin((t / L) * Math.PI * 2 * 5 + 2);
+      const leaves = highpass(noiseBurst(L, (t) => sway(t) * (0.7 + 0.3 * noise())), 1800);
+      const crickets = osc(L, () => 4400, 'sine', (t) => {
+        const c = (t * 2.5) % 1;
+        return c < 0.24 ? Math.pow(Math.max(0, Math.sin(c / 0.24 * Math.PI * 3)), 2) * (0.6 + 0.4 * Math.sin((t / L) * Math.PI * 2 * 3)) : 0;
+      });
+      const far = osc(L, () => 3700, 'sine', (t) => { const c = (t * 1.5 + 0.3) % 1; return c < 0.3 ? Math.pow(Math.max(0, Math.sin(c / 0.3 * Math.PI * 4)), 2) * 0.5 : 0; });
+      const owl = buf(L);
+      for (const [at, f, d] of [[7.2, 392, 0.34], [7.75, 370, 0.22], [8.05, 370, 0.22], [8.5, 349, 0.55]] as const) {
+        const h = lowpass(osc(d + 0.1, (t) => f * (1 - t * 0.06), 'sine', adsr(0.06, 0.05, 0.8, 0.12, d + 0.1)), 1200);
+        const o = Math.round(at * SR);
+        for (let i = 0; i < h.length && i + o < owl.length; i++) owl[i + o]! += h[i]!;
+      }
+      return normalize(mix(lowpass(noiseBurst(L, () => 1), 160), [leaves, 0.22], [crickets, 0.05], [far, 0.03], [owl, 0.18]), 0.3);
+    }
   }
 }
 
 export type ReverbId = 'hall' | 'metal' | 'hangar' | 'reactor' | 'cave' | 'machinery' | 'tight' | 'open';
 export const REVERBS: ReverbId[] = ['hall', 'metal', 'hangar', 'reactor', 'cave', 'machinery', 'tight', 'open'];
 export const REVERB_OF: Record<AmbienceId, ReverbId> = {
-  hub: 'hall', foundry: 'metal', dock: 'hangar', reactor: 'reactor', gallery: 'cave', crusher: 'machinery', tunnel: 'tight', wind: 'open',
+  hub: 'hall', foundry: 'metal', dock: 'hangar', reactor: 'reactor', gallery: 'cave', crusher: 'machinery', tunnel: 'tight', wind: 'open', forest: 'open',
 };
 export function renderReverb(id: ReverbId): [Float32Array, Float32Array] {
   switch (id) {

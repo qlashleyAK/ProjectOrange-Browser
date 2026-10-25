@@ -15,6 +15,7 @@ import { WorkerTransport, WsTransport } from './net/transport';
 import { CameraRig } from './render/camera';
 import { Effects } from './render/effects';
 import { LightRig } from './render/lights';
+import { PowerupRenderer } from './render/powerups';
 import { MissileRenderer, PickupRenderer, ProjectileRenderer } from './render/projectiles';
 import { Renderer } from './render/renderer';
 import { ShipRenderer } from './render/ships';
@@ -69,7 +70,7 @@ function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string):
 const AMBIENCE_OF: Record<Theme, string> = {
   refinery: 'hub', industrial: 'foundry', hangar: 'dock', reactor: 'reactor', rock: 'gallery', machinery: 'crusher', tunnel: 'tunnel', sewer: 'tunnel',
   office: 'hub', garage: 'gallery', roof: 'wind', shaft: 'tunnel',
-  mine: 'hub', works: 'foundry', cave: 'gallery', drift: 'tunnel',
+  mine: 'hub', works: 'foundry', cave: 'gallery', drift: 'tunnel', forest: 'forest',
 };
 const tunnelRoomsOf = (a: ArenaData) => new Map<string, [string, string]>(a.blueprint.tunnels.map((t) => [t.id, [t.a, t.b]]));
 
@@ -96,6 +97,20 @@ async function boot(): Promise<void> {
   let arenaView: ArenaView = buildArena(arena);
   renderer.scene.add(arenaView.group);
   const lights = new LightRig(renderer.scene, arenaView, arena.adjacency, tunnelRoomsOf(arena));
+  const applyAtmosphere = (a: ArenaData) => {
+    const at = a.blueprint.atmosphere;
+    if (at) {
+      renderer.scene.fog = new THREE.FogExp2(at.fog.color, at.fog.density);
+      renderer.scene.background = new THREE.Color(at.fog.color);
+      renderer.scene.environmentIntensity = 0.22;
+    } else {
+      renderer.scene.fog = null;
+      renderer.scene.background = new THREE.Color(0x020306);
+      renderer.scene.environmentIntensity = 0.32;
+    }
+    lights.setAtmosphere(at);
+  };
+  applyAtmosphere(arena);
   // every zone's shaders at once, in parallel, instead of a stall the first time each floor comes into view
   const precompileArena = () => { void renderer.renderer.compileAsync(arenaView.group, renderer.camera, renderer.scene); };
   precompileArena();
@@ -104,6 +119,7 @@ async function boot(): Promise<void> {
   const projR = new ProjectileRenderer(renderer.scene);
   const missileR = new MissileRenderer(renderer.scene, effects);
   const pickupR = new PickupRenderer(renderer.scene);
+  const powerupR = new PowerupRenderer(renderer.scene, effects);
   const camRig = new CameraRig(renderer.camera);
   const presenter = new Presenter(effects, shipR, camRig, renderer.camera);
   console.info(`arena ready in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -127,6 +143,7 @@ async function boot(): Promise<void> {
     arenaView = buildArena(a);
     renderer.scene.add(arenaView.group);
     lights.setArena(arenaView, a.adjacency, tunnelRoomsOf(a));
+    applyAtmosphere(a);
     precompileArena();
     lastPlace = null;
     losCache.clear();
@@ -377,11 +394,17 @@ async function boot(): Promise<void> {
 
     if (!s) {
       // menu backdrop: a slow drift through the hub (or the first room of other maps)
-      const hub = arena.blueprint.rooms.find((r) => r.id === 'hub') ?? arena.blueprint.rooms[0]!;
       const t = nowMs / 1000 * 0.05;
-      const orbit = hub.id === 'hub' ? 0.32 : 0.4;
-      renderer.camera.position.set(hub.center.x + Math.cos(t) * hub.size.x * orbit, hub.center.y + Math.sin(t * 0.7) * 12, hub.center.z + Math.sin(t) * hub.size.z * orbit);
-      renderer.camera.lookAt(hub.center.x, hub.center.y, hub.center.z);
+      const bd = arena.blueprint.atmosphere?.backdrop;
+      if (bd) {
+        renderer.camera.position.set(bd.target.x + Math.cos(t) * bd.radius, bd.target.y + bd.height + Math.sin(t * 0.7) * 12, bd.target.z + Math.sin(t) * bd.radius);
+        renderer.camera.lookAt(bd.target.x, bd.target.y, bd.target.z);
+      } else {
+        const hub = arena.blueprint.rooms.find((r) => r.id === 'hub') ?? arena.blueprint.rooms[0]!;
+        const orbit = hub.id === 'hub' ? 0.32 : 0.4;
+        renderer.camera.position.set(hub.center.x + Math.cos(t) * hub.size.x * orbit, hub.center.y + Math.sin(t * 0.7) * 12, hub.center.z + Math.sin(t) * hub.size.z * orbit);
+        renderer.camera.lookAt(hub.center.x, hub.center.y, hub.center.z);
+      }
       renderer.setHorizontalFov(settings.fov);
       const place = arenaView.updateVisibility(renderer.camera.position);
       lights.updateStatic(place, renderer.camera.position);
@@ -444,9 +467,12 @@ async function boot(): Promise<void> {
     const missiles = src.missiles();
     missileR.update(missiles, dt, renderer.camera);
     pickupR.update(src.pickups(), time, renderer.camera);
+    powerupR.update(src.powerup(), time, dt);
+    const extra: typeof effects.lightRequests = [];
+    shipR.auraLights(extra);
     const placeId = arenaView.updateVisibility(camPos);
     lights.updateStatic(placeId, camPos);
-    lights.updateDynamic(effects.lightRequests, camPos);
+    lights.updateDynamic(effects.lightRequests.concat(extra), camPos);
     arenaView.animate(time, src.envTick());
     effects.update(dt, renderer.camera);
 
@@ -471,7 +497,7 @@ async function boot(): Promise<void> {
     // HUD
     const net = src.netStats();
     hud.update({
-      dt, time, camera: renderer.camera, local: L, localView, ships, missiles, roster, match: src.match(),
+      dt, time, camera: renderer.camera, local: L, localView, ships, missiles, powerup: src.powerup(), roster, match: src.match(),
       place: place?.name ?? null, placeSub: place?.kind === 'tunnel' ? 'Tunnel' : null,
       net, warning: src.warning(), assist: input.assist, firstPerson: camRig.firstPerson, joystick: input.joystick,
       losTo: (id) => {

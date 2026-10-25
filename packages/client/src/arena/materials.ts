@@ -76,7 +76,7 @@ float pa_stars(vec2 p, float px, float density, float rad) {
 
 export type ArenaSurface =
   | 'metal' | 'rock' | 'hazard' | 'concrete' | 'plaster' | 'carpet' | 'tiles' | 'membrane' | 'fabric'
-  | 'minerock' | 'dirt' | 'shotcrete' | 'timber' | 'grate' | 'steel';
+  | 'minerock' | 'dirt' | 'shotcrete' | 'timber' | 'grate' | 'steel' | 'bark' | 'moss';
 type GrainAxis = 'x' | 'y' | 'z';
 
 export interface ArenaMatOpts {
@@ -92,7 +92,7 @@ export interface ArenaMatOpts {
   accent?: number;
   /** scale of the surface's procedural bump (0 = flat shading from the geometry alone) */
   bump?: number;
-  /** timber only: the world axis the grain runs along */
+  /** timber and bark: the world axis the grain runs along */
   grain?: GrainAxis;
 }
 
@@ -203,6 +203,35 @@ function surfaceGlsl(o: ArenaMatOpts, panel: string): string {
       diffuseColor.rgb *= 0.82 + 0.3 * pa_fbm(vWPos * 0.15);
       detail = 0.55 + grain * 0.3;
       height = grain * 0.03 - check * 0.05;`;
+    case 'bark': return `
+      // dark wet bark: deep furrows along the limb, knotholes, moss in the cracks
+      vec3 gq = ${GRAIN[o.grain ?? 'y']};
+      float furrow = pa_noiseAA(gq, pxw * 4.0);
+      float furrow2 = pa_noiseAA(gq * vec3(2.4, 2.1, 2.1) + 4.0, pxw * 9.0);
+      float plate = pa_fbmAA(vWPos * 0.18 + 3.0, pxw * 0.18);
+      float knot = smoothstep(0.78, 0.88, pa_noiseAA(vWPos * 0.55 + 11.0, pxw * 0.55));
+      float moss = smoothstep(0.55, 0.8, pa_fbm(vWPos * 0.22 + 19.0)) * (0.35 + 0.65 * (1.0 - furrow));
+      diffuseColor.rgb *= 0.55 + 0.7 * plate;
+      diffuseColor.rgb *= 0.62 + 0.5 * furrow;
+      diffuseColor.rgb *= 0.88 + 0.18 * furrow2;
+      diffuseColor.rgb *= 1.0 - knot * 0.45;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.22, 0.17), moss * 0.7);
+      detail = 0.45 + furrow * 0.4 - moss * 0.5;
+      height = (furrow - 0.5) * 0.12 + (furrow2 - 0.5) * 0.04 - knot * 0.08 + moss * 0.03;`;
+    case 'moss': return `
+      // leaf-litter and moss over damp earth: lumps, wet hollows, pale grit
+      float big = pa_fbm(vWPos * 0.04);
+      float mid = pa_fbmAA(vWPos * 0.28, pxw * 0.28);
+      float grit = pa_noiseAA(vWPos * 2.8 + 2.0, pxw * 2.8);
+      float wet = smoothstep(0.62, 0.78, pa_fbm(vWPos * 0.055 + 8.0)) * dom.y;
+      float tuft = smoothstep(0.58, 0.82, pa_noiseAA(vWPos * 0.7 + 15.0, pxw * 0.7));
+      diffuseColor.rgb *= 0.55 + 0.65 * big;
+      diffuseColor.rgb *= 0.78 + 0.32 * mid;
+      diffuseColor.rgb *= 0.88 + 0.16 * grit;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.22, 0.30, 0.24), tuft * 0.45);
+      diffuseColor.rgb *= 1.0 - wet * 0.4;
+      detail = mid - wet * 1.4 + tuft * 0.2;
+      height = (mid - 0.5) * 0.45 + (big - 0.5) * 0.7 + grit * 0.04 + tuft * 0.08;`;
     case 'grate': return `
       // flat-bar grating: dark gaps, averaged out far away
       vec2 gpx = max(fwidth(puv), vec2(1e-4));
@@ -347,8 +376,8 @@ export function arenaMaterial(o: ArenaMatOpts): THREE.MeshStandardMaterial {
   return mat;
 }
 
-/** The rooftop's black box: stars painted on its real walls (so you can see them coming), and a faint grid up close. */
-export function skyBoxMaterial(floorY: number): THREE.ShaderMaterial {
+/** The night sky painted on a room's real walls. The rooftop keeps a faint grid up close; the forest does not. */
+export function skyBoxMaterial(floorY: number, grid = true): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     name: 'sky-box',
     uniforms: { uFloorY: { value: floorY } },
@@ -371,7 +400,7 @@ export function skyBoxMaterial(floorY: number): THREE.ShaderMaterial {
         float h = clamp((vW.y - uFloorY) / 110.0, 0.0, 1.0);
         vec3 col = vec3(0.004, 0.006, 0.016) * (1.0 - h) * (1.0 - an.y) + vec3(0.82, 0.88, 1.0) * s;
         float near = 1.0 - smoothstep(18.0, 70.0, length(cameraPosition - vW));
-        col += vec3(0.18, 0.34, 0.75) * pa_grid(uv, 10.0, 0.15) * near * 0.4;
+        col += vec3(0.18, 0.34, 0.75) * pa_grid(uv, 10.0, 0.15) * near * 0.4 * float(${grid ? 1 : 0});
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
@@ -433,6 +462,7 @@ const THEME_COLORS: Record<Theme, SurfaceSpec> = {
   garage: { color: 0x66686b, surface: 'concrete', panel: 6, metal: 0.02, rough: 0.9 },
   roof: { color: 0x45474b, surface: 'membrane', panel: 4, metal: 0.02, rough: 0.9 },
   shaft: { color: 0x5c5f63, surface: 'concrete', panel: 4, metal: 0.02, rough: 0.88 },
+  forest: { color: 0x3e4a40, surface: 'moss', panel: 8, metal: 0, rough: 0.96, bump: 1 },
 };
 
 export type WallPart = 'wall' | 'floor' | 'ceiling';
@@ -449,6 +479,7 @@ const THEME_PARTS: Partial<Record<Theme, Partial<Record<WallPart, SurfaceSpec | 
   works: { floor: { color: 0x47494d, surface: 'concrete', panel: 8, metal: 0.02, rough: 0.85, stains: true }, ceiling: MINE_ROCK },
   drift: { floor: DIRT },
   sewer: { floor: { ...DIRT, color: 0x383d3e } },
+  forest: { wall: 'sky', ceiling: 'sky' },
 };
 
 export class ArenaMaterials {
@@ -463,7 +494,7 @@ export class ArenaMaterials {
   /** `floorY` sets where the sky box's horizon haze starts; `accent` colors ore veins. */
   wall(theme: Theme, part: WallPart, floorY = 0, accent = 0xffffff): THREE.Material {
     const spec = THEME_PARTS[theme]?.[part] ?? THEME_COLORS[theme];
-    if (spec === 'sky') return this.get(`sky-box-${floorY}`, () => skyBoxMaterial(floorY));
+    if (spec === 'sky') return this.get(`sky-box-${floorY}-${theme}`, () => skyBoxMaterial(floorY, theme !== 'forest'));
     const key = `wall-${spec.surface}-${spec.color.toString(16)}-${spec.panel}${spec.stains ? '-s' : ''}${spec.veins ? `-v${spec.veins}-${accent.toString(16)}` : ''}`;
     return this.get(key, () => arenaMaterial({ name: key, ...spec, accent }));
   }
@@ -507,6 +538,8 @@ export class ArenaMaterials {
         }));
       }
       case 'sky': return this.get('p-sky', () => skyWindowMaterial());
+      case 'bark': return this.get(`p-bark-${grain}`, () => arenaMaterial({ name: 'p-bark', color: 0x5a6058, surface: 'bark', metal: 0, rough: 0.92, grain, bump: 1 }));
+      case 'moss': return this.get(`p-moss${sp}`, () => arenaMaterial({ name: 'p-moss', color: 0x4a5848, surface: 'moss', metal: 0, rough: 0.96, bump: 1, objectSpace: moving }));
     }
   }
 

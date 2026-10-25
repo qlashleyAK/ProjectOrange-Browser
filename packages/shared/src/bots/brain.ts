@@ -35,7 +35,7 @@ export const BOT_NAMES = [
   'Wren', 'Brisk', 'Cinder', 'Gale', 'Onyx', 'Spindle', 'Torque', 'Lumen', 'Piston', 'Rivet', 'Flint', 'Hex',
 ];
 
-type Goal = 'hunt' | 'engage' | 'collect' | 'evade' | 'retreat';
+type Goal = 'hunt' | 'engage' | 'collect' | 'evade' | 'retreat' | 'powerup';
 
 export class BotBrain {
   goal: Goal = 'hunt';
@@ -90,7 +90,8 @@ export class BotBrain {
     // target choice: distance, low health, high power (bounty)
     let best: Ship | null = null, bestScore = -Infinity;
     for (const s of visible) {
-      if (s.safe) continue;
+      // shooting a reflector only hurts the shooter
+      if (s.safe || s.powerup === 'reflect') continue;
       const d = vdist(me.pos, s.pos);
       const health = (s.hull + s.shield) / (s.def.hull + s.def.shield);
       const score = -d / 150 + (1 - health) * 1.5 + s.power * 0.25 + (s.id === this.targetId ? 0.5 : 0);
@@ -106,9 +107,11 @@ export class BotBrain {
       }
     }
     const enemyD = best ? vdist(me.pos, best.pos) : Infinity;
+    const live = sim.powerups.live, powerD = live && !me.powerup ? vdist(me.pos, live.pos) : Infinity;
 
     if (me.missileWarn > 0) this.goal = 'evade';
     else if (hullFrac < 0.3 && me.power === 0 && best && enemyD < 250) this.goal = 'retreat';
+    else if (powerD < 140 || (powerD < 700 && enemyD > 220)) this.goal = 'powerup';
     else if (pick && (sim.tick < this.chaseDropsUntil && pick.killerId === me.id)) this.goal = 'collect';
     else if (best && enemyD < me.def.preferredRange[1] * 1.6) this.goal = 'engage';
     else if (pick && (pickD < 150 || pickD * 2.5 < enemyD)) this.goal = 'collect';
@@ -206,7 +209,7 @@ export class BotBrain {
         const cone = Math.max(6 * DEG, Math.atan2(target.def.boundingRadius + 3, dist));
         if (reacted && aimErr < cone && dist < w.speed * w.life) out.flags |= InputFlag.Primary;
         // secondary: hold to lock, release when locked or after a while
-        if (sim.tick >= this.nextMissileTick && me.ammo > 0 && dist < me.def.secondary.lockRange && seekErr < me.def.secondary.lockConeDeg * DEG) {
+        if (sim.tick >= this.nextMissileTick && (me.ammo > 0 || me.powerup === 'haste') && dist < me.def.secondary.lockRange && seekErr < me.def.secondary.lockConeDeg * DEG) {
           if (this.secondaryHoldTicks === 0) {
             const early = !target.isBot && !this.rng.chance(sk.lockPatience);
             this.snapTicks = early ? this.rng.int(12, Math.max(13, Math.round(me.def.secondary.lockTime * 0.8 / DT))) : Infinity;
@@ -232,6 +235,13 @@ export class BotBrain {
         if (!p) { this.goal = 'hunt'; break; }
         goTo(p.pos);
         if (vdist(me.pos, p.pos) < 40) boost = false;
+        break;
+      }
+      case 'powerup': {
+        const live = sim.powerups.live;
+        if (!live || me.powerup) { this.goal = 'hunt'; break; }
+        goTo(live.pos);
+        if (vdist(me.pos, live.pos) < 50) boost = false;
         break;
       }
       case 'evade': {
@@ -271,7 +281,7 @@ export class BotBrain {
         let dest: V3 | null = null;
         let nearest = Infinity;
         for (const s of sim.shipList) {
-          if (s.id === me.id || !s.alive || s.safe) continue;
+          if (s.id === me.id || !s.alive || s.safe || s.powerup === 'reflect') continue;
           const d = vdist(s.pos, me.pos) - s.power * 30;
           if (d < nearest) { nearest = d; dest = s.pos; }
         }

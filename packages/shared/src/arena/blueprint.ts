@@ -5,14 +5,18 @@ export type Theme =
   | 'refinery' | 'industrial' | 'hangar' | 'reactor' | 'rock' | 'machinery' | 'tunnel' | 'sewer'
   | 'office' | 'garage' | 'roof' | 'shaft'
   /** Hollowdeep: blasted-rock caverns, shotcrete works halls, a natural cave and timbered drifts */
-  | 'mine' | 'works' | 'cave' | 'drift';
+  | 'mine' | 'works' | 'cave' | 'drift'
+  /** Gloamwood: leaf-litter floor under an open night sky */
+  | 'forest';
 /**
  * `sky` is a visual-only window onto the night sky; `color` tints paint and fabric. `ore` is rock shot with
  * veins glowing in `emissive`; `grate` is bar grating, glowing `emissive` through the gaps when given.
  */
 export type PropMaterial =
   | 'metal' | 'darkMetal' | 'rock' | 'crystal' | 'emissive' | 'hazard'
-  | 'concrete' | 'plaster' | 'fabric' | 'paint' | 'sky' | 'timber' | 'grate' | 'ore';
+  | 'concrete' | 'plaster' | 'fabric' | 'paint' | 'sky' | 'timber' | 'grate' | 'ore'
+  /** `bark` furrows run along a limb's length; `moss` is rock under a mossy cap */
+  | 'bark' | 'moss';
 
 export interface Room {
   id: string; name: string; center: V3; size: V3; wall: number; landmark: number; theme: Theme;
@@ -21,7 +25,9 @@ export interface Room {
   /** ambient sound bed, when it isn't the theme's */
   ambience?: string;
   /** bot nav nodes on an xz grid of `step` meters at each height offset from the center, linked to near neighbors only */
-  navGrid?: { step: number; ys: number[] };
+  navGrid?: { step: number; ys: number[]; /** link reach in steps (default 2.9) */ reach?: number };
+  /** hand-placed lights replacing the automatic ones; the nearest few to the camera are lit */
+  lights?: { pos: V3; color: number; intensity: number; distance: number }[];
 }
 export interface Tunnel {
   id: string; a: string; b: string; side: number; path: V3[]; theme: Theme; bonus?: boolean; label?: string;
@@ -45,6 +51,16 @@ export type Prop = PropBase & (
   /** stalactite or stalagmite: an irregular cone from `center` along `dir` */
   | { kind: 'spike'; center: V3; dir: V3; length: number; radius: number; seed: number }
   | { kind: 'ring'; center: V3; radius: number; tube: number; axis: 'x' | 'y' | 'z' }
+  /**
+   * A tapering bough through `points` (world space; `center` is any point of it inside the room), radius `radii[i]`
+   * at each, solid as one capsule per span at the larger end's radius, so neighbouring radii should differ by little.
+   * Points may sink below the floor.
+   */
+  | { kind: 'limb'; center: V3; points: V3[]; radii: number[]; seed: number; role?: 'trunk' | 'root' | 'branch' }
+  /** convex hull of `points` (flat xyz, relative to `center`) */
+  | { kind: 'hull'; center: V3; points: number[] }
+  /** fallen hollow trunk lying along `dir` (horizontal), open at both ends */
+  | { kind: 'log'; center: V3; dir: V3; length: number; outer: number; inner: number; seed: number }
 );
 
 /** Pose is a pure function of the tick (arena/movers.ts), so every simulation agrees on it without networking it. */
@@ -65,10 +81,19 @@ export interface Blueprint {
   movers?: Mover[];
   /** when present, every spawn point is inside a safe zone */
   safeZones?: SafeZone[];
-  /** hand-placed spawn points (facing the room center), instead of three per room */
-  spawns?: { room: string; pos: V3 }[];
-  /** world orange target ×scale up to cap; room spawn regions weigh ×roomWeight */
-  oranges?: { scale: number; cap: number; roomWeight: number };
+  /** hand-placed spawn points (facing the room center unless `facing` is given), instead of the automatic ones */
+  spawns?: { room: string; pos: V3; facing?: V3 }[];
+  /** world orange target ×scale up to cap; room spawn regions weigh ×roomWeight; extra weighted boxes */
+  oranges?: { scale: number; cap: number; roomWeight: number; zones?: { id: string; min: V3; max: V3; weight: number; spacing?: number }[] };
+  /** powerup spots in rotation order, instead of one near each room's center */
+  powerups?: V3[];
+  /** client look: exponential fog, a moonlight from `moon` (toward the moon), hemisphere fill, menu camera orbit */
+  atmosphere?: {
+    fog: { color: number; density: number };
+    moon?: { dir: V3; color: number; intensity: number };
+    hemi?: { sky: number; ground: number; intensity: number };
+    backdrop?: { target: V3; radius: number; height: number };
+  };
 }
 
 const _qa = q4(), _qb = q4();

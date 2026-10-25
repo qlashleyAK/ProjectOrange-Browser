@@ -3,6 +3,7 @@ import type { EndReason, Missile, Ship } from '../entities.js';
 import type { GameSim } from '../game.js';
 import { DEG, qrot, v3, vdot, vlen, vnorm, type V3 } from '../math.js';
 import { castStatic, lineOfSight } from '../physicsWorld.js';
+import { HASTE_CADENCE, HASTE_LOCK, QUAD_DAMAGE } from '../powerups.js';
 import { applyDamage, applySplash } from './damage.js';
 import { segmentVsShip } from './hitVolumes.js';
 
@@ -26,8 +27,8 @@ export function lockCandidateScore(sim: GameSim, s: Ship, t: Ship, coneDeg: numb
 
 export function updateLock(sim: GameSim, s: Ship, held: boolean): void {
   const sec = s.def.secondary;
-  const L = s.lock;
-  if (!held || s.ammo <= 0) { L.targetId = -1; L.progress = 0; L.locked = false; return; }
+  const L = s.lock, haste = s.powerup === 'haste';
+  if (!held || (s.ammo <= 0 && !haste)) { L.targetId = -1; L.progress = 0; L.locked = false; return; }
   // keep current target if still valid, else pick best
   let cur = L.targetId >= 0 ? sim.ship(L.targetId) : undefined;
   if (cur && lockCandidateScore(sim, s, cur, sec.lockConeDeg, sec.lockRange) < 0) cur = undefined;
@@ -42,14 +43,14 @@ export function updateLock(sim: GameSim, s: Ship, held: boolean): void {
     if (!best) return;
   }
   L.progress += DT;
-  if (!L.locked && L.progress >= sec.lockTime) { L.locked = true; sim.emit({ t: 'lockOn', shipId: s.id, targetId: L.targetId }); }
+  if (!L.locked && L.progress >= sec.lockTime / (haste ? HASTE_LOCK : 1)) { L.locked = true; sim.emit({ t: 'lockOn', shipId: s.id, targetId: L.targetId }); }
 }
 
 export function launchSecondary(sim: GameSim, s: Ship): boolean {
-  const sec = s.def.secondary;
-  if (s.ammo <= 0) return false;
-  if ((sim.tick - s.secondaryLastFire) * DT < sec.refire) return false;
-  s.ammo--;
+  const sec = s.def.secondary, haste = s.powerup === 'haste';
+  if (s.ammo <= 0 && !haste) return false;
+  if ((sim.tick - s.secondaryLastFire) * DT < sec.refire / (haste ? HASTE_CADENCE : 1)) return false;
+  if (!haste) s.ammo--;
   s.secondaryLastFire = sim.tick;
   if (s.cloaked) sim.breakCloak(s);
   sim.endSpawnProtection(s);
@@ -77,7 +78,7 @@ export function launchSecondary(sim: GameSim, s: Ship): boolean {
     const m: Missile = {
       id: sim.nextMissileId(), ownerId: s.id, def: sec, pos: origin, vel, targetId: target, tracking: target >= 0,
       spawnTick: sim.tick, endTick: sim.tick + Math.round(sec.life / DT), hp: sec.hp ?? 0,
-      converge: target < 0 && sec.count > 1 ? converge : null, damage: sec.damage * s.tier.damage,
+      converge: target < 0 && sec.count > 1 ? converge : null, damage: sec.damage * s.tier.damage * (s.powerup === 'quad' ? QUAD_DAMAGE : 1),
     };
     sim.missiles.push(m);
     sim.emit({ t: 'missileSpawn', id: m.id, ownerId: s.id, kind: sec.id, pos: { ...origin }, vel: { ...vel }, targetId: target });

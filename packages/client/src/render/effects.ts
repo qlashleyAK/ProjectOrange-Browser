@@ -65,10 +65,14 @@ export class Effects {
   private smoke: Particle[] = [];
   private smokeMesh: THREE.InstancedMesh;
   private smokeAlpha: THREE.InstancedBufferAttribute;
+  private motes: Particle[] = [];
+  private moteMesh: THREE.InstancedMesh;
+  private moteAlpha: THREE.InstancedBufferAttribute;
   readonly lightRequests: LightRequest[] = [];
   maxSparks = 600;
   maxDebris = 240;
   maxSmoke = 300;
+  maxMotes = 700;
   debrisEnabled = true;
 
   private m = new THREE.Matrix4();
@@ -111,6 +115,25 @@ export class Effects {
     this.smokeMesh.frustumCulled = false;
     this.smokeMesh.count = 0;
     this.group.add(this.smokeMesh);
+
+    const moteMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { map: { value: this.flashTex } },
+      vertexShader: /* glsl */ `
+        attribute float aAlpha; varying vec3 vC; varying float vA; varying vec2 vUv;
+        void main() { vUv = uv; vC = instanceColor; vA = aAlpha; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D map; varying vec3 vC; varying float vA; varying vec2 vUv;
+        void main() { float a = texture2D(map, vUv).a * vA; if (a < 0.004) discard; gl_FragColor = vec4(vC * a, a); }`,
+    });
+    const moteGeo = new THREE.PlaneGeometry(1, 1);
+    this.moteAlpha = new THREE.InstancedBufferAttribute(new Float32Array(this.maxMotes), 1);
+    moteGeo.setAttribute('aAlpha', this.moteAlpha);
+    this.moteMesh = new THREE.InstancedMesh(moteGeo, moteMat, this.maxMotes);
+    this.moteMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxMotes * 3), 3);
+    this.moteMesh.frustumCulled = false;
+    this.moteMesh.count = 0;
+    this.group.add(this.moteMesh);
 
     this.shieldMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -230,6 +253,12 @@ export class Effects {
     this.smoke.push({ pos: pos.clone(), vel: vel.clone(), life, max: life, size, color: new THREE.Color(color), spin: new THREE.Vector3(), rot: new THREE.Euler(0, 0, Math.random() * 6.28), drag: 1.2, grow });
   }
 
+  /** Additive glowing billboard mote that drifts, shrinks and fades. */
+  moteAt(pos: THREE.Vector3, vel: THREE.Vector3, color: THREE.ColorRepresentation, size: number, life: number, drag = 1.5): void {
+    if (this.motes.length >= this.maxMotes) this.motes.shift();
+    this.motes.push({ pos: pos.clone(), vel: vel.clone(), life, max: life, size, color: new THREE.Color(color), spin: new THREE.Vector3(), rot: new THREE.Euler(), drag, grow: 0 });
+  }
+
   update(dt: number, camera: THREE.Camera): void {
     // sprites
     for (let i = this.sprites.length - 1; i >= 0; i--) {
@@ -342,6 +371,26 @@ export class Effects {
     this.smokeAlpha.needsUpdate = true;
     this.smokeMesh.instanceMatrix.needsUpdate = true;
     if (this.smokeMesh.instanceColor) this.smokeMesh.instanceColor.needsUpdate = true;
+
+    n = 0;
+    for (let i = this.motes.length - 1; i >= 0; i--) {
+      const p = this.motes[i]!;
+      p.life -= dt;
+      if (p.life <= 0) { this.motes.splice(i, 1); continue; }
+      p.pos.addScaledVector(p.vel, dt);
+      p.vel.multiplyScalar(Math.exp(-p.drag * dt));
+      const k = p.life / p.max;
+      this.s.setScalar(p.size * (0.35 + 0.65 * k));
+      this.m.compose(p.pos, camera.quaternion, this.s);
+      this.moteMesh.setMatrixAt(n, this.m);
+      this.moteMesh.setColorAt(n, this.tmpColor.copy(p.color).multiplyScalar(2.5));
+      this.moteAlpha.setX(n, Math.min(1, (1 - k) * 8) * k);
+      n++;
+    }
+    this.moteMesh.count = n;
+    this.moteAlpha.needsUpdate = true;
+    this.moteMesh.instanceMatrix.needsUpdate = true;
+    if (this.moteMesh.instanceColor) this.moteMesh.instanceColor.needsUpdate = true;
   }
   private tmpColor = new THREE.Color();
 
@@ -350,7 +399,7 @@ export class Effects {
     for (const f of this.meshes) { f.obj.visible = false; this.group.remove(f.obj); (f.obj.userData.ring ? this.ringPool : this.spherePool).push(f.obj); }
     for (const f of this.shields) { f.obj.visible = false; this.group.remove(f.obj); this.shieldPool.push(f.obj); }
     this.sprites = []; this.meshes = []; this.shields = [];
-    this.sparks = []; this.debris = []; this.smoke = [];
+    this.sparks = []; this.debris = []; this.smoke = []; this.motes = [];
     this.lightRequests.length = 0;
   }
 }

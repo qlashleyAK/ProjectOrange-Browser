@@ -1,5 +1,5 @@
 import type {
-  ArenaData, ClassId, GameEvent, MatchPhase, PrimaryDef, Q4, RAPIER, RosterEntry, SecondaryDef, ShipClassDef, TierEffect, V3,
+  ArenaData, ClassId, GameEvent, MatchPhase, PowerupKind, PrimaryDef, Q4, RAPIER, RosterEntry, SecondaryDef, ShipClassDef, TierEffect, V3,
 } from '@orange/shared';
 
 /** Render-ready state of one ship (already interpolated / predicted). */
@@ -29,6 +29,7 @@ export interface ShipView {
   safe: boolean;
   boosting: boolean;
   isLocal: boolean;
+  powerup: PowerupKind | null;
 }
 
 export interface LocalState {
@@ -70,11 +71,16 @@ export interface LocalState {
   killerId: number;
   primary: PrimaryDef;
   secondary: SecondaryDef;
+  powerup: PowerupKind | null;
+  /** seconds left on the powerup */
+  powerupLeft: number;
 }
 
 export interface ProjView { id: number; ownerId: number; weapon: PrimaryDef; pos: V3; vel: V3; age: number }
 export interface MissileView { id: number; ownerId: number; kind: string; color: number; pos: V3; vel: V3 }
 export interface PickupView { id: number; pos: V3; units: number; drop: boolean; expireIn: number; killerId: number }
+/** the live powerup, else where the next appears and in how many seconds */
+export interface PowerupView { live: { id: number; kind: PowerupKind; pos: V3 } | null; next: { pos: V3; in: number } | null }
 /** `nextArena`: id of the map the following match is played on (null until the server has said) */
 export interface MatchView { phase: MatchPhase; timeLeft: number; winnerId: number; elapsed: number; nextArena: string | null }
 
@@ -93,6 +99,7 @@ export interface ViewSource {
   projectiles(): ProjView[];
   missiles(): MissileView[];
   pickups(): PickupView[];
+  powerup(): PowerupView;
   roster(): RosterEntry[];
   match(): MatchView;
   drainEvents(): GameEvent[];

@@ -558,6 +558,30 @@ target = 8 + ceil(activePlayers × 1.5), capped at 40 live world oranges
   walls, for 5 s.
 - Drops don't count toward the world-population target.
 
+### 6.8 Powerups
+
+One global powerup is in play at a time. It is a colored crystal in a main
+room (or over Gloamwood's spire), not an orange.
+
+| Kind | Color | Effect for 30 s |
+|---|---|---|
+| Quad Damage | red `#FF2448` | every shot and missile deals ×4 |
+| Quad Reflect | green `#3DFF5C` | the holder still takes the hit; the attacker takes ×4 of it back. Reflected damage does not bounce again. A reflected kill counts for the holder. |
+| Quad Haste | purple `#B04CFF` | ×4 primary fire rate, free energy, free missiles at a quarter of the usual refire |
+| Quad Speed | yellow `#FFF23A` | ×4 thrust, ×2 top speed (×4 would outrun the shots), boost never drains |
+
+- **Spawn:** when a match is in progress and nothing is live, a powerup
+  appears. The next one is on a **10 s** timer after a take, whether or not
+  the first has run out. Kind never repeats back to back. Spots rotate:
+  Gloamwood has one (the tip); every other map has one near the center of
+  each main room, clear of movers, safe zones, doorways and spawns.
+- **Take:** first living ship within 5 m past its bounding radius. Spawn
+  protection ends. A ship already holding one cannot take another.
+- **End:** after 30 s, on death, or on round/map reset.
+- **Client:** a spinning crystal, rings, a light pillar and motes at the
+  live spot; a ghost cage where the next will appear. Holders wear a colored
+  aura and trail motes. The HUD has a timer bar, a world marker, and toasts.
+
 ---
 
 ## 7. Ship models (procedural, built in code)
@@ -802,7 +826,7 @@ WaitingForPlayers → Warmup (5 s; 3 s offline) → InProgress → PostMatch (12
 ```
 
 - **Map rotation:** every match is played on the next map, in registry order
-  (Hollowdeep Mine → The Gyre → Meridian Tower → Hollowdeep …). When the
+  (Hollowdeep Mine → The Gyre → Meridian Tower → Gloamwood → Hollowdeep …). When the
   post-match screen ends, `GameSim.rotateArena()` despawns everyone, frees the
   physics world and builds the next map's colliders, spawns, nav graph,
   movers and fresh bot brains; the normal round reset then respawns everyone
@@ -1580,8 +1604,9 @@ Tunnels use a short tight reverb. A room can name its ambience
 (`Room.ambience`, as all six Hollowdeep rooms do); otherwise it is picked by
 theme (mine/refinery/office → Crucible, works/industrial → Foundry,
 hangar → Dock, reactor → Reactor, cave/rock/garage → Gallery,
-machinery → Crusher, tunnel/sewer/drift/shaft → tunnel). The rooftop gets its own **wind** loop (gusting band-passed
-howl over a low rumble) with an open, nearly dry reverb.
+machinery → Crusher, tunnel/sewer/drift/shaft → tunnel, forest → forest). The rooftop gets its own **wind** loop (gusting band-passed
+howl over a low rumble) with an open, nearly dry reverb. Gloamwood's bed is
+night insects and a low wind, with the same open reverb.
 
 ### 15.8 Second map: "The Gyre" (`shared/arena/gyre.ts`)
 
@@ -1686,6 +1711,36 @@ happens in the risky, cover-less links rather than on the floors.
   - the client precompiles every zone's shaders when a map loads, rather
     than stalling the first time each floor comes into view.
 
+### 15.10 Fourth map: "Gloamwood" (`shared/arena/forest.ts`)
+
+One vast night forest, about 720 × 280 × 720 m, under an open sky. A twisting
+spire of vein-lit stone stands at the center. A chamber in its foot is the
+safe zone and every spawn; the powerup floats just over the crystal tip.
+
+- **Chamber:** five leaning legs leave five arches. Ten spawns (two heights
+  in each arch) face out along the avenues. Safe zone radius 24 m around
+  `(0, −113, 0)`. A glowing pool and hanging root lanterns light the inside.
+- **Avenues:** five 48 m-wide, 230 m-long clearings from the arches into the
+  woods, so you can fly out without hitting a trunk.
+- **Trees:** gnarled, coiled, forked and leaning trunks with buttress roots
+  and curling boughs (`kind: 'limb'`, capsule colliders). They crowd toward
+  the walls and stay off the glade, the spire and the avenues. Landmarks:
+  the Coil (a corkscrew you can fly up through), the Arch (a trunk that
+  rises, rolls over and roots again), the Twins (two trunks wound together),
+  the Hollow (a 110 m fallen log you can fly the length of), and giant
+  mushrooms with glowing gills in the outskirts.
+- **Ground:** mossy mounds, boulders and fallen limbs. The floor is leaf
+  litter; the walls and ceiling are the night sky (no rooftop grid).
+- **Oranges:** four outskirts boxes hold more than 90% of the spawn weight
+  (target ×3, cap 80). Room weight is near zero, so the glade stays empty.
+- **Look:** exponential night fog, a moon directional light, fungus-glow
+  point lights in the understory, and a cold bark/moss palette. Orange stays
+  reserved.
+- **Engine extensions:** `limb` (tapering tube), `hull` (convex), `log`
+  (hollow fallen trunk); `bark` and `moss` materials; a blueprint
+  `atmosphere` (fog, moon, hemisphere, menu camera); hand-placed `lights`
+  on a room; `powerups` spots.
+
 ---
 
 ## 16. HUD (DOM overlay)
@@ -1715,11 +1770,14 @@ In priority order:
    ("WARMUP 3…", "MATCH POINT").
 7. **Location** (top left): the current room name (navigation in a big arena).
 8. **Kill feed** (top right), **hit marker** + optional damage numbers, and
-   toasts ("+2 ORANGES", "TIER 6 — REPEL ONLINE").
-9. **Network warning:** only when RTT > 150 ms or loss is detected.
-10. **Scoreboard** (hold Tab): name, class icon, K/D/A, power, ping, `[BOT]`
+   toasts ("+2 ORANGES", "TIER 6 — REPEL ONLINE", "QUAD DAMAGE HAS SPAWNED").
+9. **Powerup:** a world marker (or edge arrow) on the live crystal, a ghost
+    countdown where the next will appear, and a colored timer bar while you
+    hold one.
+10. **Network warning:** only when RTT > 150 ms or loss is detected.
+11. **Scoreboard** (hold Tab): name, class icon, K/D/A, power, ping, `[BOT]`
     tag.
-11. **Debug overlay** (H): FPS, frame ms, tick, RTT, interp delay,
+12. **Debug overlay** (H): FPS, frame ms, tick, RTT, interp delay,
     corrections/s, input buffer depth, speed, assist state. Never mixed into
     the combat HUD.
 

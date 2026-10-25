@@ -1,8 +1,8 @@
 import {
-  activePrimary, cloakVisible, DT, GameSim, nextInRotation, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3, vlerp,
-  type ArenaData, type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
+  activePrimary, cloakVisible, DT, GameSim, nextInRotation, powerupInfo, powerupLeft, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3,
+  vlerp, type ArenaData, type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
 } from '@orange/shared';
-import type { LocalState, MatchView, MissileView, PickupView, ProjView, ShipView, ViewSource } from '../view';
+import type { LocalState, MatchView, MissileView, PickupView, PowerupView, ProjView, ShipView, ViewSource } from '../view';
 
 export interface InputSampler {
   beginFrame(ticks: number): void;
@@ -46,7 +46,13 @@ export function localStateOf(sim: GameSim, s: Ship, killerId: number): LocalStat
     holdSpawn: s.holdSpawn,
     holdLeft: s.alive ? 0 : Math.max(0, (s.deathTick + RESPAWN_HOLD_MAX_S / DT - sim.tick) * DT),
     killerId, primary: activePrimary(s.def, s.tier), secondary: s.def.secondary,
+    powerup: s.alive ? s.powerup : null, powerupLeft: powerupLeft(sim, s),
   };
+}
+
+export function powerupViewOf(sim: GameSim, back = 0): PowerupView {
+  const info = powerupInfo(sim);
+  return { live: info.live, next: info.next ? { pos: info.next.pos, in: Math.max(0, (info.next.tick - sim.tick) * DT - back) } : null };
 }
 
 /** Single-player practice: the full simulation runs locally against bots. */
@@ -102,7 +108,7 @@ export class OfflineSource implements ViewSource {
           id: s.id, name: s.name, isBot: s.isBot, classId: s.def.id, accent: s.accent, alive: false, gen: 0,
           pos: v3(), rot: q4(), vel: v3(), hullFrac: 1, shieldFrac: 1, power: 0, tierIndex: -1, cloaked: false,
           shimmer: false, bulwark: false, overdrive: false, spawnProtected: false, safe: false, boosting: false,
-          isLocal: s.id === this.localId,
+          isLocal: s.id === this.localId, powerup: null,
         };
         this.shipViews.set(s.id, v);
       }
@@ -120,6 +126,7 @@ export class OfflineSource implements ViewSource {
       v.spawnProtected = this.sim.tick < s.spawnProtectedUntil;
       v.safe = s.safe;
       v.boosting = s.flight.boosting;
+      v.powerup = s.powerup;
       out.push(v);
     }
     for (const id of this.shipViews.keys()) if (!this.sim.ships.has(id)) this.shipViews.delete(id);
@@ -154,6 +161,7 @@ export class OfflineSource implements ViewSource {
     }));
   }
 
+  powerup(): PowerupView { return powerupViewOf(this.sim, this.alpha * DT); }
   roster(): RosterEntry[] { return rosterOf(this.sim); }
   match(): MatchView { return matchViewOf(this.sim); }
   drainEvents(): GameEvent[] { const e = this.events; this.events = []; return e; }

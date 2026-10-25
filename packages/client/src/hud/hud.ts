@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import {
-  arenaInfo, CLASSES, CLASS_LIST, KILLS_TO_WIN, MAX_POWER, nextTierUnits, PRIMARY_TABLE,
-  type ClassId, type GameEvent, type RosterEntry,
+  arenaInfo, CLASSES, CLASS_LIST, KILLS_TO_WIN, MAX_POWER, nextTierUnits, POWERUP_DURATION_S, POWERUPS, PRIMARY_TABLE,
+  type ClassId, type GameEvent, type PowerupKind, type RosterEntry,
 } from '@orange/shared';
 import { settings } from '../settings';
 import { accentCss } from '../ships/materials';
-import type { LocalState, MatchView, MissileView, NetStats, ShipView } from '../view';
+import type { LocalState, MatchView, MissileView, NetStats, PowerupView, ShipView } from '../view';
 
 const SHAPES: Record<ClassId, string> = { dart: 'tri', mule: 'square', scythe: 'diamond', brute: 'circle' };
 const WEAPON_NAMES: Record<string, string> = {
   ...Object.fromEntries(PRIMARY_TABLE.map((w) => [w.id, w.name])),
   ...Object.fromEntries(CLASS_LIST.map((c) => [c.secondary.id, c.secondary.name])),
-  collision: 'Collision', world: 'Collision',
+  collision: 'Collision', world: 'Collision', reflect: 'Reflected',
 };
+export const powerupCss = (k: PowerupKind) => `#${POWERUPS[k].color.toString(16).padStart(6, '0')}`;
 
 export interface HudFrame {
   dt: number;
@@ -22,6 +23,7 @@ export interface HudFrame {
   localView: ShipView | null;
   ships: ShipView[];
   missiles: MissileView[];
+  powerup: PowerupView;
   roster: RosterEntry[];
   match: MatchView;
   place: string | null;
@@ -68,6 +70,11 @@ export class Hud {
   private lead: HTMLElement;
   private lockEl: HTMLElement;
   private arrows: HTMLElement[] = [];
+  private pwMarker: HTMLElement;
+  private pwArrow: HTMLElement;
+  private pwTimer: HTMLElement;
+  private pwBar: HTMLElement;
+  private pwLabel: HTMLElement;
   private hitmark: HTMLElement;
   private hitT = 0;
   private dmgArc: HTMLElement;
@@ -154,6 +161,8 @@ export class Hud {
     this.joyDot = el('div', 'joy-dot hidden', this.root);
     this.lead = el('div', 'lead hidden', this.markerLayer);
     this.lockEl = el('div', 'lock hidden', this.markerLayer);
+    this.pwMarker = el('div', 'pw-marker hidden', this.markerLayer);
+    this.pwArrow = el('div', 'edge-arrow pw-arrow hidden', this.markerLayer);
     this.hitmark = el('div', 'hitmark', this.layer);
     this.dmgArc = el('div', 'dmg-arc', this.layer);
 
@@ -177,6 +186,10 @@ export class Hud {
     this.abilityIcon = el('div', 'icon', icons, '<div class="ring"></div><span class="lbl"></span><span class="key">G</span>');
     this.dodgeTick = el('div', 'dodge-tick', this.weapons);
     this.assistEl = el('div', 'assist', this.weapons);
+
+    this.pwTimer = el('div', 'pw-timer hidden', this.layer);
+    this.pwLabel = el('div', 'pw-label', this.pwTimer);
+    this.pwBar = el('i', '', el('div', 'pw-bar', this.pwTimer));
 
     this.power = el('div', 'power', this.layer);
     const pipRow = el('div', 'pips', this.power);
@@ -315,6 +328,21 @@ export class Hud {
       case 'phase':
         if (e.phase === 'inProgress') this.showBanner('FIGHT!', `First to ${KILLS_TO_WIN} kills`, 1.6);
         break;
+      case 'powerupSpawn': this.toast(`${POWERUPS[e.kind].name.toUpperCase()} HAS SPAWNED`, powerupCss(e.kind), 2.2); break;
+      case 'powerupTake': {
+        const def = POWERUPS[e.kind];
+        if (e.shipId === me) { this.showBanner(def.name.toUpperCase(), def.blurb, 2.4); this.flourishT = 1.2; }
+        else {
+          const div = el('div', '', this.killfeed);
+          div.innerHTML = `<b style="color:${this.colorOf(f.roster, e.shipId)}">${esc(this.nameOf(f.roster, e.shipId))}</b> <span style="color:var(--dim)">took</span> <b style="color:${powerupCss(e.kind)}">${esc(def.name)}</b>`;
+          setTimeout(() => div.remove(), 6000);
+          while (this.killfeed.children.length > 5) this.killfeed.firstElementChild?.remove();
+        }
+        break;
+      }
+      case 'powerupEnd':
+        if (e.shipId === me && e.reason === 'expire') this.toast(`${POWERUPS[e.kind].name.toUpperCase()} WORE OFF`, '#aaa', 2);
+        break;
       default: break;
     }
   }
@@ -407,10 +435,11 @@ export class Hud {
         m.style.left = `${scr.x}px`; m.style.top = `${scr.y - Math.min(60, 900 / Math.max(10, d))}px`;
         m.style.color = color;
         const near = d < 260;
-        const key = `${s.classId}|${near ? s.name : ''}|${Math.round(s.hullFrac * 20)}|${Math.round(s.shieldFrac * 20)}|${s.power}|${s.shimmer}`;
+        const key = `${s.classId}|${near ? s.name : ''}|${Math.round(s.hullFrac * 20)}|${Math.round(s.shieldFrac * 20)}|${s.power}|${s.shimmer}|${s.powerup}`;
         if (m.dataset.key !== key) {
           m.dataset.key = key;
-          m.innerHTML = `<div class="shape ${SHAPES[s.classId]}"></div>${near ? `<div>${esc(s.name)}${s.power > 0 ? ` <span class="pw">●${s.power}</span>` : ''}</div>
+          const tag = s.powerup ? `<div class="pw-tag" style="color:${powerupCss(s.powerup)}">${POWERUPS[s.powerup].short}</div>` : '';
+          m.innerHTML = `${tag}<div class="shape ${SHAPES[s.classId]}"></div>${near ? `<div>${esc(s.name)}${s.power > 0 ? ` <span class="pw">●${s.power}</span>` : ''}</div>
             <div class="bars"><i style="width:${s.shieldFrac * 100}%;background:var(--shield);height:2px"></i><i style="top:2px;width:${s.hullFrac * 100}%;background:${s.hullFrac < 0.25 ? 'var(--hull-low)' : 'var(--hull)'};height:2px"></i></div>` : (s.power > 0 ? `<div class="pw">●${s.power}</div>` : '')}`;
         }
         m.style.opacity = s.shimmer ? '0.5' : '1';
@@ -431,6 +460,7 @@ export class Hud {
     }
     for (let i = mi; i < this.markers.length; i++) this.markers[i]!.style.display = 'none';
     for (let i = ai; i < this.arrows.length; i++) this.arrows[i]!.style.display = 'none';
+    this.updatePowerupMarker(f, alive && !post);
 
     if (alive && settings.leadPip && best && L && lv) {
       const speed = L.primary.speed;
@@ -520,8 +550,53 @@ export class Hud {
     if (this.showDebug) this.debugEl.textContent = Object.entries(f.debug).map(([k, v]) => `${k.padEnd(14)} ${v}`).join('\n');
   }
 
+  private updatePowerupMarker(f: HudFrame, show: boolean): void {
+    const { live, next } = f.powerup;
+    const spot = live?.pos ?? next?.pos;
+    if (!show || !spot) { this.pwMarker.classList.add('hidden'); this.pwArrow.classList.add('hidden'); return; }
+    const p = new THREE.Vector3(spot.x, spot.y, spot.z);
+    const lv = f.localView;
+    const d = lv ? p.distanceTo(new THREE.Vector3(lv.pos.x, lv.pos.y, lv.pos.z)) : p.distanceTo(f.camera.position);
+    const scr = this.project(p, f.camera);
+    const color = live ? powerupCss(live.kind) : '#cfd8e6';
+    if (scr.on) {
+      this.pwArrow.classList.add('hidden');
+      this.pwMarker.classList.remove('hidden');
+      this.pwMarker.style.left = `${scr.x}px`; this.pwMarker.style.top = `${scr.y}px`;
+      this.pwMarker.style.color = color;
+      this.pwMarker.classList.toggle('next', !live);
+      const key = live ? `${live.kind}|${Math.round(d / 10)}` : `n|${Math.ceil(next!.in)}|${Math.round(d / 10)}`;
+      if (this.pwMarker.dataset.key !== key) {
+        this.pwMarker.dataset.key = key;
+        this.pwMarker.innerHTML = `<div class="gem"></div><div>${live ? POWERUPS[live.kind].short : `POWERUP ${Math.ceil(next!.in)}s`}</div><small>${Math.round(d)}m</small>`;
+      }
+    } else {
+      this.pwMarker.classList.add('hidden');
+      if (!live) { this.pwArrow.classList.add('hidden'); return; }
+      const W = window.innerWidth, H = window.innerHeight;
+      let dx = scr.x - W / 2, dy = scr.y - H / 2;
+      if (scr.behind) { dx = -dx; dy = -dy; }
+      const ang = Math.atan2(dy, dx), r = Math.min(W, H) * 0.46;
+      this.pwArrow.classList.remove('hidden');
+      this.pwArrow.style.left = `${W / 2 + Math.cos(ang) * r - 8}px`; this.pwArrow.style.top = `${H / 2 + Math.sin(ang) * r - 7}px`;
+      this.pwArrow.style.transform = `rotate(${ang + Math.PI / 2}rad)`;
+      this.pwArrow.style.color = color;
+    }
+  }
+
   private updateVitals(f: HudFrame, L: LocalState): void {
     const def = L.def;
+    const pk = L.alive ? L.powerup : null;
+    this.pwTimer.classList.toggle('hidden', !pk);
+    if (pk) {
+      const c = powerupCss(pk);
+      this.pwTimer.style.color = c;
+      this.pwBar.style.background = c;
+      this.pwBar.style.width = `${Math.min(1, L.powerupLeft / POWERUP_DURATION_S) * 100}%`;
+      const label = `${POWERUPS[pk].name.toUpperCase()} · ${Math.ceil(L.powerupLeft)}s`;
+      if (this.pwLabel.textContent !== label) this.pwLabel.textContent = label;
+      this.pwTimer.classList.toggle('ending', L.powerupLeft < 5);
+    }
     this.protectedEl.classList.toggle('hidden', !L.spawnProtected || L.safe);
     this.safeEl.classList.toggle('hidden', !L.inSafeZone);
     if (L.inSafeZone) {

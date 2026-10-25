@@ -4,6 +4,7 @@ import type { FlightState } from './flight.js';
 import type { InputCmd } from './input.js';
 import type { Q4, V3 } from './math.js';
 import type { TierEffect } from './power.js';
+import type { PowerupKind } from './powerups.js';
 
 export interface PoseSample { tick: number; pos: V3; rot: Q4; alive: boolean; generation: number }
 
@@ -56,6 +57,8 @@ export interface Ship {
   /** inside a safe zone with charge left: untouchable, but weapons and abilities are offline */
   safe: boolean;
   safeCharge: number;
+  powerup: PowerupKind | null;
+  powerupUntil: number;
   deathTick: number;
   respawnAt: number;
   holdSpawn: boolean;
@@ -139,6 +142,11 @@ export type GameEvent =
   | { t: 'scrape'; shipId: number; pos: V3; force: number }
   | { t: 'phase'; phase: MatchPhase }
   | { t: 'matchEnd'; winnerId: number }
-  | { t: 'lockOn'; shipId: number; targetId: number };
+  | { t: 'lockOn'; shipId: number; targetId: number }
+  | { t: 'powerupSpawn'; id: number; kind: PowerupKind; pos: V3 }
+  | { t: 'powerupTake'; id: number; shipId: number; kind: PowerupKind; pos: V3; until: number; nextTick: number; nextPos: V3 }
+  | { t: 'powerupEnd'; shipId: number; kind: PowerupKind; reason: 'expire' | 'death' | 'reset' }
+  /** the live powerup is withdrawn untaken (new round or map) */
+  | { t: 'powerupClear' };
 
 export type MatchPhase = 'waiting' | 'warmup' | 'inProgress' | 'postMatch';

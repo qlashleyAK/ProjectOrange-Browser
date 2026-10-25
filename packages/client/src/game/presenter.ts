@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CLASS_LIST, ORANGE_HEX, PRIMARY_TABLE, type GameEvent, type PrimaryDef } from '@orange/shared';
+import { CLASS_LIST, ORANGE_HEX, POWERUPS, PRIMARY_TABLE, type GameEvent, type PrimaryDef } from '@orange/shared';
 import { audio } from '../audio/audio';
 import type { SoundName } from '../audio/sounds';
 import type { CameraRig } from '../render/camera';
@@ -72,6 +72,14 @@ export class Presenter {
       case 'hit': {
         const p = v(e.pos);
         const target = views.get(e.targetId);
+        if (e.weapon === 'reflect') {
+          const g = POWERUPS.reflect.color;
+          fx.flash(p, g, 1, 7, 0.25, { tell: true, intensity: flashScale, light: 2 });
+          fx.sparksAt(p, null, g, 18, 30, 0.4);
+          const holder = views.get(e.attackerId);
+          if (holder) fx.ring(v(holder.pos), null, g, 3, 9, 0.3, 0.8, { tell: true });
+          audio.play('reflectZap', e.targetId === localId || e.attackerId === localId ? { gain: 0.8 } : { pos: e.pos, gain: 0.8 });
+        } else if (views.get(e.attackerId)?.powerup === 'quad' && e.shield + e.hull > 0) fx.sparksAt(p, null, POWERUPS.quad.color, 10, 26, 0.35);
         if (e.shield > 0 && target) {
           const root = this.ships.rootOf(e.targetId);
           const dir = target ? this.tmp.copy(p).sub(v(target.pos)).normalize().clone() : new THREE.Vector3(0, 0, 1);
@@ -123,6 +131,24 @@ export class Presenter {
         fx.flash(v(e.pos), ORANGE_HEX, 0.6, 3, 0.18, { tell: true, intensity: flashScale });
         break;
       }
+      case 'powerupSpawn': {
+        const c = POWERUPS[e.kind].color;
+        fx.flash(v(e.pos), c, 1.2, 10, 0.4, { tell: true, intensity: flashScale, light: 3 });
+        fx.ring(v(e.pos), null, c, 2, 16, 0.5, 0.8, { tell: true });
+        audio.play('powerupSpawn', { pos: e.pos, gain: 0.8 });
+        break;
+      }
+      case 'powerupTake': {
+        const c = POWERUPS[e.kind].color;
+        const p = v(e.pos);
+        fx.flash(p, c, 1.4, 12, 0.45, { tell: true, intensity: flashScale, light: 3 });
+        fx.ring(p, null, c, 2, 18, 0.55, 0.9, { tell: true });
+        audio.play('powerup', e.shipId === localId ? { bus: 'ui', gain: 0.9 } : { pos: e.pos, gain: 0.8 });
+        break;
+      }
+      case 'powerupEnd':
+        if (e.shipId === localId && e.reason !== 'reset') audio.play('powerdown', { bus: 'ui', gain: 0.7 });
+        break;
       case 'tier':
         if (e.shipId === localId) audio.play(e.gained ? 'tierUp' : 'tierDown', { bus: 'ui' });
         break;

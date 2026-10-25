@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_INPUTS_PER_PACKET, Reader, decodeInputPacket, decodeQuat, decodeSnapshot, encodeInputPacket, encodeQuat, encodeSnapshot,
-  newFlightState, q4, qangle, qfromAxisAngle, qnorm, quantizeInput, seqDiff, seqGreater, v3, type InputCmd, type Snapshot,
+  newFlightState, powerupFlags, powerupFromFlags, powerupFromIndex, powerupIndex, q4, qangle, qfromAxisAngle, qnorm, quantizeInput,
+  seqDiff, seqGreater, v3, type InputCmd, type Snapshot,
 } from '../src/index.js';
 
 describe('quantization', () => {
@@ -44,8 +45,9 @@ describe('snapshot codec', () => {
         flight: { ...newFlightState(), boostMeter: 0.123456789 }, energy: 55.5, ammo: 3, abilityCooldown: 4, abilityActive: 1, repelCooldown: 0,
         power: 6, hull: 80, shield: 20, maxShield: 103.5, lockTarget: -1, lockProgress: 0, locked: false, lockWarn: 1, missileWarn: 2,
         bulwarkHp: 0, primaryLastFire: 123400, muzzleIndex: 5, spawnProtectedUntil: 0, cloaked: false, safeCharge: 6.5,
+        powerup: powerupIndex('haste'), powerupLeft: 17.25,
       },
-      ships: [{ id: 1, gen: 2, cls: 3, pos: v3(-100.001, 50, 20), rot: qfromAxisAngle(q4(), v3(1, 0, 0), 1), vel: v3(70, -3, 2), angvel: v3(1, 2, -3), boost: 0.5, flags: 9, hull: 0.5, shield: 1, power: 4 }],
+      ships: [{ id: 1, gen: 2, cls: 3, pos: v3(-100.001, 50, 20), rot: qfromAxisAngle(q4(), v3(1, 0, 0), 1), vel: v3(70, -3, 2), angvel: v3(1, 2, -3), boost: 0.5, flags: 9 | powerupFlags('speed'), hull: 0.5, shield: 1, power: 4 }],
       missiles: [{ id: 77, pos: v3(1, 2, 3), vel: v3(140, 0, 0) }],
       projSpawns: [{ id: 5, owner: 1, weapon: 2, pos: v3(1, 2, 3), vel: v3(380, 0, 0), spawnTick: 123450, shotId: 0x7fffffff, index: 3 }],
       projEnds: [{ id: 4, reason: 2, pos: v3(5, 5, 5) }],
@@ -63,6 +65,10 @@ describe('snapshot codec', () => {
     expect(d.projSpawns[0]!.shotId).toBe(0x7fffffff);
     expect(d.projSpawns[0]!.vel.x).toBeCloseTo(380, 0);
     expect(d.projEnds[0]!.reason).toBe(2);
+    expect(powerupFromIndex(d.owner!.powerup)).toBe('haste');
+    expect(d.owner!.powerupLeft).toBe(17.25);
+    expect(powerupFromFlags(d.ships[0]!.flags)).toBe('speed');
+    expect(d.ships[0]!.flags & 0x7ff).toBe(9);
     expect(bytes.byteLength).toBeLessThan(300);
   });
 });

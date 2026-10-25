@@ -1,5 +1,5 @@
 import { DT } from '../constants.js';
-import { q4, qfromAxisAngle, qrot, segmentPointDistSq, v3, type Q4, type V3 } from '../math.js';
+import { q4, qfromAxisAngle, qfromTo, qrot, segmentPointDistSq, v3, type Q4, type V3 } from '../math.js';
 import { boxRotation, type Mover, type Prop } from './blueprint.js';
 
 const AXIS: Record<'x' | 'y' | 'z', V3> = { x: v3(1, 0, 0), y: v3(0, 1, 0), z: v3(0, 0, 1) };
@@ -58,6 +58,21 @@ export function partSpheres(p: Prop): Sphere[] {
       return [{ c: v3(p.center.x + p.dir.x * h, p.center.y + p.dir.y * h, p.center.z + p.dir.z * h), r: h + p.radius }];
     }
     case 'ring': return [{ c: p.center, r: p.radius + p.tube }];
+    case 'limb': {
+      const out: Sphere[] = [];
+      for (let i = 0; i + 1 < p.points.length; i++) {
+        const a = p.points[i]!, b = p.points[i + 1]!, r = Math.max(p.radii[i]!, p.radii[i + 1]!);
+        const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / r));
+        for (let k = 0; k <= n; k++) out.push({ c: v3(a.x + (b.x - a.x) * (k / n), a.y + (b.y - a.y) * (k / n), a.z + (b.z - a.z) * (k / n)), r: r * 1.5 });
+      }
+      return out;
+    }
+    case 'hull': {
+      let r = 0;
+      for (let i = 0; i < p.points.length; i += 3) r = Math.max(r, Math.hypot(p.points[i]!, p.points[i + 1]!, p.points[i + 2]!));
+      return [{ c: p.center, r }];
+    }
+    case 'log': return boxSpheres(p.center, v3(p.length, p.outer * 2, p.outer * 2), qfromTo(q4(), v3(1, 0, 0), p.dir));
   }
 }
 

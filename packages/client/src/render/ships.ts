@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { BULWARK_DISTANCE, BULWARK_RADIUS, CLASSES } from '@orange/shared';
+import { BULWARK_DISTANCE, BULWARK_RADIUS, CLASSES, POWERUP_KINDS, POWERUPS, type PowerupKind } from '@orange/shared';
 import { accentColor, cloakMaterial } from '../ships/materials';
 import { buildShip, type ShipModel } from '../ships/models';
 import type { ShipView } from '../view';
-import type { Effects } from './effects';
+import type { Effects, LightRequest } from './effects';
 
 const plumeGeo = (() => {
   const g = new THREE.ConeGeometry(1, 1, 12, 1, true);
@@ -42,6 +42,38 @@ function bulwarkMaterial(): THREE.ShaderMaterial {
   });
 }
 
+const auraGeo = new THREE.SphereGeometry(1, 40, 24);
+
+/** Powerup shell: fresnel rim plus a per-kind pattern (quad bands, reflect hexes, haste rings, speed streaks). */
+function auraMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color() }, uKind: { value: 0 }, uAlpha: { value: 1 } },
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main() { vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime; uniform vec3 uColor; uniform float uKind; uniform float uAlpha;
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      float hexLine(vec2 p) {
+        p *= vec2(1.0, 1.1547); p.x += mod(floor(p.y), 2.0) * 0.5;
+        vec2 f = abs(fract(p) - 0.5);
+        return smoothstep(0.4, 0.5, max(f.x * 1.5 + f.y, f.y * 2.0) * 0.5 + 0.25);
+      }
+      void main() {
+        float rim = pow(clamp(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.2);
+        vec3 p = vP;
+        float pat;
+        if (uKind < 0.5) pat = pow(0.5 + 0.5 * sin(p.z * 8.0 - uTime * 9.0 + sin(atan(p.y, p.x) * 3.0 + uTime * 2.0) * 1.5), 4.0);
+        else if (uKind < 1.5) pat = hexLine(vec2(atan(p.z, p.x) * 2.6, p.y * 3.2 + uTime * 0.3)) * (0.6 + 0.4 * sin(uTime * 5.0 + p.z * 3.0));
+        else if (uKind < 2.5) pat = smoothstep(0.86, 1.0, fract(-p.z * 3.0 - uTime * 2.6)) + smoothstep(0.9, 1.0, fract(atan(p.y, p.x) * 0.955 + uTime * 0.8)) * 0.5;
+        else pat = pow(0.5 + 0.5 * sin(atan(p.y, p.x) * 9.0), 8.0) * smoothstep(-1.0, 1.0, p.z) * (0.6 + 0.4 * sin(p.z * 10.0 - uTime * 30.0));
+        float a = (rim * 0.8 + pat * (0.22 + rim * 0.7)) * uAlpha;
+        gl_FragColor = vec4(uColor * a * 1.8, a);
+      }`,
+  });
+}
+
 interface Entry {
   view: ShipView;
   model: ShipModel;
@@ -49,6 +81,11 @@ interface Entry {
   root: THREE.Group;
   plumes: THREE.Mesh[];
   plumeMat: THREE.MeshBasicMaterial;
+  plumeBase: THREE.Color;
+  aura: THREE.Mesh;
+  auraKind: PowerupKind | null;
+  auraT: number;
+  moteT: number;
   bulwark: THREE.Mesh;
   bubble: THREE.Mesh;
   cloakMat: ReturnType<typeof cloakMaterial>;
@@ -109,9 +146,14 @@ export class ShipRenderer {
       new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 0.8, 1.0), transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false }));
     bubble.visible = false;
     root.add(bubble);
+    const aura = new THREE.Mesh(auraGeo, auraMaterial());
+    aura.scale.set(def.size.x * 0.62, def.size.y * 0.9 + 0.8, def.size.z * 0.6);
+    aura.visible = false;
+    root.add(aura);
     this.group.add(root);
     return {
-      view: v, model, key: `${v.classId}:${v.accent}`, root, plumes, plumeMat, bulwark, bubble, cloakMat: cloakMaterial(), cloakOn: false,
+      view: v, model, key: `${v.classId}:${v.accent}`, root, plumes, plumeMat, plumeBase: plumeMat.color.clone(), aura, auraKind: null, auraT: 0, moteT: 0,
+      bulwark, bubble, cloakMat: cloakMaterial(), cloakOn: false,
       smokeT: 0, rcsT: 0, lastPos: new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z), wasBulwark: false,
     };
   }
@@ -124,7 +166,61 @@ export class ShipRenderer {
     (e.bulwark.material as THREE.Material).dispose();
     e.bubble.geometry.dispose();
     (e.bubble.material as THREE.Material).dispose();
+    (e.aura.material as THREE.Material).dispose();
     e.cloakMat.dispose();
+  }
+
+  private updateAura(e: Entry, v: ShipView, dt: number, t: number): void {
+    const k = v.shimmer ? null : v.powerup;
+    if (k !== e.auraKind) {
+      e.auraKind = k;
+      e.auraT = 0;
+      if (k) e.plumeMat.color.copy(e.plumeBase).lerp(new THREE.Color(POWERUPS[k].color).multiplyScalar(2.5), 0.75);
+      else e.plumeMat.color.copy(e.plumeBase);
+    }
+    e.aura.visible = !!k;
+    if (!k) return;
+    e.auraT += dt;
+    const color = POWERUPS[k].color;
+    const u = (e.aura.material as THREE.ShaderMaterial).uniforms;
+    u.uTime!.value = t;
+    u.uKind!.value = POWERUP_KINDS.indexOf(k);
+    (u.uColor!.value as THREE.Color).setHex(color);
+    u.uAlpha!.value = (v.isLocal ? 0.45 : 1) * Math.min(1, e.auraT * 3) * (0.85 + 0.15 * Math.sin(t * 6 + v.id));
+    const pop = 1 + Math.max(0, 0.4 - e.auraT) * 1.5;
+    const def = CLASSES[v.classId];
+    e.aura.scale.set(def.size.x * 0.62 * pop, (def.size.y * 0.9 + 0.8) * pop, def.size.z * 0.6 * pop);
+
+    e.moteT -= dt;
+    if (e.moteT > 0) return;
+    e.moteT = v.isLocal ? 0.05 : 0.025;
+    const q = e.root.quaternion, sx = def.size.x * 0.55, sy = def.size.y * 0.6, sz = def.size.z * 0.55;
+    const drift = new THREE.Vector3(v.vel.x * 0.55, v.vel.y * 0.55, v.vel.z * 0.55);
+    for (let i = 0; i < 2; i++) {
+      const a = Math.random() * Math.PI * 2, b = Math.acos(Math.random() * 2 - 1);
+      const off = new THREE.Vector3(Math.sin(b) * Math.cos(a) * sx, Math.cos(b) * sy, Math.sin(b) * Math.sin(a) * sz).applyQuaternion(q);
+      const p = e.root.position.clone().add(off);
+      const out = off.clone().normalize().multiplyScalar(2 + Math.random() * 3);
+      if (k === 'speed') this.effects.moteAt(p, drift.clone().multiplyScalar(0.6), color, 0.9 + Math.random() * 0.8, 0.5 + Math.random() * 0.3, 0.5);
+      else this.effects.moteAt(p, out.add(drift).add(new THREE.Vector3(0, k === 'reflect' ? 1.5 : 0.5, 0)), color, 0.8 + Math.random() * 0.9, 0.7 + Math.random() * 0.5);
+    }
+    if (k === 'quad' && Math.random() < 0.2) {
+      const p = e.root.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * sx * 2, (Math.random() - 0.5) * sy, (Math.random() - 0.5) * sz * 2).applyQuaternion(q));
+      this.effects.sparksAt(p, null, color, 4, 14, 0.25);
+    }
+    if (k === 'haste') for (const m of e.model.muzzles) if (Math.random() < 0.5) this.effects.moteAt(m.getWorldPosition(new THREE.Vector3()), drift, color, 1.2, 0.3, 3);
+    if (k === 'speed' && Math.hypot(v.vel.x, v.vel.y, v.vel.z) > 40) {
+      const back = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+      this.effects.sparksAt(e.root.position.clone().addScaledVector(back, sz), back, color, 2, 30, 0.3);
+    }
+  }
+
+  /** Lights following powerup holders, merged with effect lights by the light rig. */
+  auraLights(out: LightRequest[]): void {
+    for (const e of this.entries.values()) {
+      if (!e.auraKind || !e.root.visible) continue;
+      out.push({ pos: e.root.position.clone(), color: new THREE.Color(POWERUPS[e.auraKind].color), intensity: e.view.isLocal ? 260 : 420, t: 0, dur: 1, range: 34 });
+    }
   }
 
   update(views: ShipView[], dt: number, t: number): void {
@@ -172,6 +268,7 @@ export class ShipRenderer {
         p.scale.set(size, size, (0.6 + thrust * 2.6) * flicker * (def.id === 'brute' ? 1.4 : 1));
       }
       e.plumeMat.opacity = v.boosting ? 1 : 0.8;
+      this.updateAura(e, v, dt, t);
 
       // Mule RCS puffs when strafing / translating sideways
       if (e.model.rcs.length) {

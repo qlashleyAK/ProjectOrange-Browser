@@ -14,6 +14,7 @@ import {
   type OwnerSnap, type ProjEndSnap, type ProjSpawnSnap, type ShipSnap,
 } from '../net/codec.js';
 import type { ClientMsg, PickupInfo, RosterEntry, ServerMsg } from '../net/messages.js';
+import { powerupFlags, powerupIndex, powerupInfo, powerupLeft } from '../powerups.js';
 import { hash32 } from '../rng.js';
 
 /** Transport-agnostic connection (WebSocket on the server, MessagePort in the offline worker). */
@@ -191,7 +192,7 @@ export class GameRoom {
         });
         this.sendJson(c, { t: 'roster', players: this.roster() });
         this.sendJson(c, this.matchMsg());
-        this.sendJson(c, { t: 'pickups', list: this.pickupList() });
+        this.sendJson(c, { t: 'pickups', list: this.pickupList(), powerup: powerupInfo(this.sim) });
         this.broadcastRoster();
         break;
       }
@@ -315,7 +316,7 @@ export class GameRoom {
     if (t0 - this.lastMatchAt > 2000) this.broadcastMatch();
     if (t0 - this.lastPickupsAt > 5000) {
       this.lastPickupsAt = t0;
-      const msg = JSON.stringify({ t: 'pickups', list: this.pickupList() } satisfies ServerMsg);
+      const msg = JSON.stringify({ t: 'pickups', list: this.pickupList(), powerup: powerupInfo(this.sim) } satisfies ServerMsg);
       for (const c of this.conns.values()) if (c.connected && c.welcomed) c.link.send(msg);
     }
     this.tickMs = this.now() - t0;
@@ -372,7 +373,7 @@ export class GameRoom {
     if (s.sweepUntil > this.sim.tick) f |= ShipFlag.Sweeping;
     if (s.flight.dodgeRollTime > 0) f |= ShipFlag.DodgeRoll;
     if (s.lock.targetId >= 0 && s.lock.progress > 0) f |= ShipFlag.Locking;
-    return f;
+    return f | powerupFlags(s.powerup);
   }
 
   private sendSnapshots(): void {
@@ -409,6 +410,7 @@ export class GameRoom {
           lockTarget: me.lock.targetId, lockProgress: me.lock.progress, locked: me.lock.locked, lockWarn: me.lockWarn, missileWarn: me.missileWarn,
           bulwarkHp: me.bulwarkHp, primaryLastFire: Math.max(0, me.primaryLastFire), muzzleIndex: me.muzzleIndex & 0xffff,
           spawnProtectedUntil: me.spawnProtectedUntil, cloaked: me.cloaked, safeCharge: me.safeCharge,
+          powerup: powerupIndex(me.powerup), powerupLeft: powerupLeft(this.sim, me),
         };
       }
       const bytes = encodeSnapshot({

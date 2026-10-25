@@ -3,7 +3,7 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  crystalPoints, DT, getA, moverPose, pillarPoints, placeAt, q4, rockPoints, spikePoints, v3,
+  crystalPoints, DT, getA, logFrame, moverPose, pillarPoints, placeAt, q4, rockPoints, spikePoints, v3,
   type ArenaData, type Axis, type Mover, type Prop, type Slab, type Theme, type V3,
 } from '@orange/shared';
 import { ArenaMaterials } from './materials';
@@ -128,6 +128,9 @@ function propGeometry(p: Prop): THREE.BufferGeometry | null {
       g = new THREE.TorusGeometry(p.radius, p.tube, 8, 48);
       if (p.axis === 'x') g.rotateY(Math.PI / 2); else if (p.axis === 'y') g.rotateX(Math.PI / 2);
       break;
+    case 'limb': return clean(limbGeometry(p));
+    case 'hull': g = convex(p.points); break;
+    case 'log': g = logGeometry(p); break;
   }
   g.translate(p.center.x, p.center.y, p.center.z);
   return clean(g);
@@ -136,8 +139,17 @@ function propGeometry(p: Prop): THREE.BufferGeometry | null {
 const AXIS_NAME = ['x', 'y', 'z'] as const;
 const MINE_THEMES = new Set<Theme>(['mine', 'works', 'cave']);
 
-/** World axis a box prop's grain runs along: its longest side, turned the way the box is. */
+/** World axis bark or timber grain runs along: a limb's span, a log's axis, or a box's longest side. */
 function grainAxis(p: Prop): 'x' | 'y' | 'z' {
+  if (p.kind === 'limb') {
+    const a = p.points[0]!, b = p.points[p.points.length - 1]!;
+    const d = [Math.abs(b.x - a.x), Math.abs(b.y - a.y), Math.abs(b.z - a.z)];
+    return AXIS_NAME[d.indexOf(Math.max(...d))]!;
+  }
+  if (p.kind === 'log') {
+    const d = [Math.abs(p.dir.x), Math.abs(p.dir.y), Math.abs(p.dir.z)];
+    return AXIS_NAME[d.indexOf(Math.max(...d))]!;
+  }
   if (p.kind !== 'box') return 'y';
   const { x, y, z } = p.size;
   const v = x >= y && x >= z ? new THREE.Vector3(1, 0, 0) : y >= z ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
@@ -145,6 +157,78 @@ function grainAxis(p: Prop): 'x' | 'y' | 'z' {
   v.applyEuler(new THREE.Euler(p.rotX ?? 0, p.rotY ?? 0, p.rotZ ?? 0, 'YXZ'));
   const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
   return AXIS_NAME[a.indexOf(Math.max(...a))]!;
+}
+
+/** Tapering tube through world-space points. Frames ride along by parallel transport so the bark doesn't twist. */
+function limbGeometry(p: Extract<Prop, { kind: 'limb' }>): THREE.BufferGeometry {
+  const n = p.points.length, segs = 8;
+  const pts = p.points.map((q) => new THREE.Vector3(q.x, q.y, q.z));
+  const T = pts.map((q, i) => {
+    const t = i === 0 ? pts[1]!.clone().sub(q) : i === n - 1 ? q.clone().sub(pts[n - 2]!) : pts[i + 1]!.clone().sub(pts[i - 1]!);
+    return t.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : t.normalize();
+  });
+  const N = new THREE.Vector3(), B = new THREE.Vector3();
+  if (Math.abs(T[0]!.y) < 0.92) N.crossVectors(T[0]!, new THREE.Vector3(0, 1, 0));
+  else N.crossVectors(T[0]!, new THREE.Vector3(1, 0, 0));
+  N.normalize();
+  B.crossVectors(T[0]!, N).normalize();
+  const rings: THREE.Vector3[][] = [];
+  const axis = new THREE.Vector3(), q = new THREE.Quaternion();
+  for (let i = 0; i < n; i++) {
+    if (i > 0) {
+      axis.crossVectors(T[i - 1]!, T[i]!);
+      const ang = T[i - 1]!.angleTo(T[i]!);
+      if (axis.lengthSq() > 1e-10 && ang > 1e-4) {
+        q.setFromAxisAngle(axis.normalize(), ang);
+        N.applyQuaternion(q); B.applyQuaternion(q);
+      }
+    }
+    const r = p.radii[i]!, ring: THREE.Vector3[] = [];
+    for (let j = 0; j < segs; j++) {
+      const a = (j / segs) * Math.PI * 2;
+      ring.push(pts[i]!.clone().addScaledVector(N, Math.cos(a) * r).addScaledVector(B, Math.sin(a) * r));
+    }
+    rings.push(ring);
+  }
+  const pos: number[] = [];
+  const push = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); };
+  for (let i = 0; i < n - 1; i++) for (let j = 0; j < segs; j++) {
+    const j1 = (j + 1) % segs;
+    const a = rings[i]![j]!, b = rings[i]![j1]!, c = rings[i + 1]![j1]!, d = rings[i + 1]![j]!;
+    push(a, b, c); push(a, c, d);
+  }
+  for (let j = 1; j < segs - 1; j++) {
+    push(rings[0]![0]!, rings[0]![j + 1]!, rings[0]![j]!);
+    push(rings[n - 1]![0]!, rings[n - 1]![j]!, rings[n - 1]![j + 1]!);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Hollow fallen trunk: outer bark, inner hollow, open ends. */
+function logGeometry(p: Extract<Prop, { kind: 'log' }>): THREE.BufferGeometry {
+  const { d, u, w } = logFrame(p.dir);
+  const D = new THREE.Vector3(d.x, d.y, d.z), U = new THREE.Vector3(u.x, u.y, u.z), W = new THREE.Vector3(w.x, w.y, w.z);
+  const segs = 16, h = p.length / 2, pos: number[] = [];
+  const ring = (t: number, r: number) => Array.from({ length: segs }, (_, i) => {
+    const a = (i / segs) * Math.PI * 2;
+    return new THREE.Vector3().addScaledVector(D, t).addScaledVector(U, Math.cos(a) * r).addScaledVector(W, Math.sin(a) * r);
+  });
+  const lo = ring(-h, p.outer), hi = ring(h, p.outer), li = ring(-h, p.inner), hi2 = ring(h, p.inner);
+  const push = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); };
+  for (let j = 0; j < segs; j++) {
+    const j1 = (j + 1) % segs;
+    push(lo[j]!, lo[j1]!, hi[j1]!); push(lo[j]!, hi[j1]!, hi[j]!);
+    push(li[j1]!, li[j]!, hi2[j]!); push(li[j1]!, hi2[j]!, hi2[j1]!);
+    push(lo[j]!, li[j]!, li[j1]!); push(lo[j]!, li[j1]!, lo[j1]!);
+    push(hi[j1]!, hi2[j1]!, hi2[j]!); push(hi[j1]!, hi2[j]!, hi[j]!);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 /** A box `w` thick from `a` to `b`. */
@@ -273,7 +357,7 @@ export function buildArena(arena: ArenaData): ArenaView {
     }
     const mine = MINE_THEMES.has(rooms.get(p.room)!.theme) && (p.material === 'metal' || p.material === 'darkMetal');
     const m = mine ? mats.steel(p.material === 'darkMetal', !!p.spin)
-      : mats.prop(p.material, p.emissive, false, p.color, p.material === 'timber' ? grainAxis(p) : undefined);
+      : mats.prop(p.material, p.emissive, false, p.color, p.material === 'timber' || p.material === 'bark' ? grainAxis(p) : undefined);
     if (p.spin) {
       g.translate(-p.center.x, -p.center.y, -p.center.z);
       const mesh = new THREE.Mesh(g, m);
@@ -655,6 +739,12 @@ export function buildArena(arena: ArenaData): ArenaView {
   // static light specs per room (landmark color): tall shafts get a light at each end, wide halls one per side
   const lights: RoomLightSpec[] = [];
   for (const r of arena.blueprint.rooms) {
+    if (r.lights) {
+      for (const l of r.lights) {
+        lights.push({ room: r.id, pos: new THREE.Vector3(l.pos.x, l.pos.y, l.pos.z), color: new THREE.Color(l.color), intensity: l.intensity, distance: l.distance, decay: 2 });
+      }
+      continue;
+    }
     const big = Math.max(r.size.x, r.size.y, r.size.z);
     const wide = Math.max(r.size.x, r.size.z);
     const color = new THREE.Color(r.light?.color ?? r.landmark);

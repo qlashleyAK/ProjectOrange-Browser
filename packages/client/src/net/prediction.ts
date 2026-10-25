@@ -1,10 +1,10 @@
 import {
   activePrimary, addArenaColliders, addMovers, applyFlightControl, applyPrimarySeek, cadenceTicks, classByIndex, copyFlightState,
   createShipBody, createWorld, CORRECTION_TAU, driveMovers, DT, HARD_SNAP_ANGLE, HARD_SNAP_DIST, InputFlag, newFlightState,
-  OVERDRIVE_CADENCE, placeMovers, PREDICTION_HISTORY, projectileCount, q4, qangle, qconj, qmul, qnorm, qslerp, resolveTier,
-  SAFE_ZONE_CHARGE_S, safeZoneAt, shotIdFor, stepSafeCharge, v3, volleyShots,
-  type ArenaData, type FlightState, type InputCmd, type MoverBody, type MuzzleShot, type OwnerSnap, type PrimaryDef, type Q4,
-  type RAPIER, type ShipClassDef, type V3,
+  placeMovers, powerupFlight, powerupFromIndex, PREDICTION_HISTORY, primaryCadence, projectileCount, q4, qangle, qconj, qmul, qnorm,
+  qslerp, resolveTier, SAFE_ZONE_CHARGE_S, safeZoneAt, shotIdFor, stepSafeCharge, v3, volleyShots,
+  type ArenaData, type FlightState, type InputCmd, type MoverBody, type MuzzleShot, type OwnerSnap, type PowerupKind, type PrimaryDef,
+  type Q4, type RAPIER, type ShipClassDef, type V3,
 } from '@orange/shared';
 
 /** Locally-predicted, non-physical state that affects flight or firing. */
@@ -18,6 +18,8 @@ interface PredState {
   prevFlags: number;
   safeCharge: number;
   safe: boolean;
+  powerup: PowerupKind | null;
+  powerupLeft: number;
 }
 
 interface HistoryEntry {
@@ -49,7 +51,7 @@ export class Predictor {
   weaponsEnabled = true;
   private st: PredState = {
     flight: newFlightState(), energy: 0, abilityActive: 0, abilityCooldown: 0, muzzleIndex: 0, sinceFire: 999, prevFlags: 0,
-    safeCharge: SAFE_ZONE_CHARGE_S, safe: false,
+    safeCharge: SAFE_ZONE_CHARGE_S, safe: false, powerup: null, powerupLeft: 0,
   };
   private history = new Map<number, HistoryEntry>();
   private lastSeq = -1;
@@ -78,6 +80,8 @@ export class Predictor {
   get energy(): number { return this.st.energy; }
   get safe(): boolean { return this.st.safe; }
   get safeCharge(): number { return this.st.safeCharge; }
+  get powerup(): PowerupKind | null { return this.st.powerup; }
+  get powerupLeft(): number { return this.st.powerupLeft; }
 
   /** (Re)create the predicted body from an authoritative owner snapshot. */
   private respawn(o: OwnerSnap): void {
@@ -104,6 +108,8 @@ export class Predictor {
     if (snapTick) this.st.sinceFire = Math.max(0, snapTick - o.primaryLastFire);
     this.st.safeCharge = o.safeCharge;
     this.st.safe = o.safeCharge > 0 && safeZoneAt(this.arena, o.pos) !== null;
+    this.st.powerup = powerupFromIndex(o.powerup);
+    this.st.powerupLeft = o.powerupLeft;
     this.power = o.power;
   }
 
@@ -144,7 +150,7 @@ export class Predictor {
     if (!this.body || !this.def) return null;
     this.copyPose(this.prevPos, this.prevRot);
     const volley = this.handleInput(cmd);
-    applyFlightControl(this.body, cmd, this.def, this.st.flight, DT, { noBoostDrain: this.overdrive() });
+    applyFlightControl(this.body, cmd, this.def, this.st.flight, DT, powerupFlight(this.overdrive(), this.st.powerup));
     this.driveEnv(this.envTickFor(cmd, n));
     this.world.step();
     this.readBody();
@@ -181,10 +187,10 @@ export class Predictor {
       st.abilityCooldown = def.ability.cooldown * tier.abilityCooldown;
     }
     if (!armed || !(f & InputFlag.Primary)) return null;
-    const w = activePrimary(def, tier);
-    const cad = tier.cadence * (this.overdrive() ? OVERDRIVE_CADENCE : 1);
-    if (st.sinceFire < cadenceTicks(w, cad) || st.energy < w.energy) return null;
-    st.energy -= w.energy;
+    const w = activePrimary(def, tier), haste = st.powerup === 'haste';
+    const cad = primaryCadence(tier, this.overdrive(), haste);
+    if (st.sinceFire < cadenceTicks(w, cad) || (!haste && st.energy < w.energy)) return null;
+    if (!haste) st.energy -= w.energy;
     st.sinceFire = 0;
     const shotId = shotIdFor(this.shipId, cmd.seq, 0);
     const shots = volleyShots(def, w, projectileCount(w, def, tier), this.pos, this.rot, st.muzzleIndex, shotId);
@@ -205,6 +211,7 @@ export class Predictor {
     const inZone = safeZoneAt(this.arena, this.pos) !== null;
     st.safeCharge = stepSafeCharge(st.safeCharge, inZone);
     st.safe = inZone && st.safeCharge > 0;
+    if (st.powerup && (st.powerupLeft -= DT) <= 0) { st.powerup = null; st.powerupLeft = 0; }
   }
 
   /**
@@ -243,6 +250,13 @@ export class Predictor {
         if (Math.abs(ds) > 0.25) {
           this.st.safeCharge = Math.max(0, Math.min(SAFE_ZONE_CHARGE_S, this.st.safeCharge + ds));
           this.st.safe = this.st.safeCharge > 0 && safeZoneAt(this.arena, this.pos) !== null;
+        }
+        // taken or lost between the acknowledged input and now: adopt it, less the ticks already predicted since
+        const pk = powerupFromIndex(o.powerup);
+        if (pk !== h.st.powerup || Math.abs(o.powerupLeft - h.st.powerupLeft) > 0.25) {
+          const ahead = ((this.lastSeq - o.lastSeq) & 0xffff) * DT;
+          this.st.powerup = pk;
+          this.st.powerupLeft = pk ? Math.max(0, o.powerupLeft - ahead) : 0;
         }
         return;
       }

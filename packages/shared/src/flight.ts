@@ -36,6 +36,9 @@ export interface FlightOptions {
   noBoostDrain?: boolean;
   /** Bots use a fraction of max turn rate */
   turnScale?: number;
+  /** speed powerup: acceleration and top speed multipliers */
+  thrustMult?: number;
+  speedMult?: number;
 }
 
 export interface FlightResult { dodged: boolean; dodgeDir: V3 | null }
@@ -98,14 +101,15 @@ export function applyFlightControl(
   }
 
   // ---- Translation
-  let accF = def.accel.fwd, accL = def.accel.lateral, accV = def.accel.vertical;
-  let maxF = def.maxSpeed.fwd;
+  const thr = opts.thrustMult ?? 1, top = opts.speedMult ?? 1;
+  let accF = def.accel.fwd * thr, accL = def.accel.lateral * thr, accV = def.accel.vertical * thr;
+  let maxF = def.maxSpeed.fwd * top;
   if (boost) { maxF *= def.boostSpeedMult; accF *= def.boostAccelMult; accL *= def.boostAccelMult; accV *= def.boostAccelMult; }
   if (assist || brake) {
     qrotInv(_t, _q, _v); // local velocity
-    let tx = input.tRight * def.maxSpeed.strafe;
-    let ty = input.tUp * def.maxSpeed.vertical;
-    let tz = -input.tFwd * (input.tFwd >= 0 ? maxF : def.maxSpeed.reverse);
+    let tx = input.tRight * def.maxSpeed.strafe * top;
+    let ty = input.tUp * def.maxSpeed.vertical * top;
+    let tz = -input.tFwd * (input.tFwd >= 0 ? maxF : def.maxSpeed.reverse * top);
     if (brake) { tx = 0; ty = 0; tz = 0; accF *= BRAKE_ACCEL_MULT; accL *= BRAKE_ACCEL_MULT; accV *= BRAKE_ACCEL_MULT; }
     // While dodging, don't fight the lateral impulse.
     if (st.dodgeRollTime > 1e-9 && !brake) { tx = _t.x; ty = _t.y; }

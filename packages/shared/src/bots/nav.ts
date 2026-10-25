@@ -97,8 +97,8 @@ export class NavGraph {
     }
     // in-room visibility links (grid rooms only link near neighbors)
     for (const [rid, ids] of roomNodes) {
-      const step = arena.blueprint.rooms.find((r) => r.id === rid)!.navGrid?.step;
-      const reach = step ? step * 2.9 : Infinity;
+      const grid = arena.blueprint.rooms.find((r) => r.id === rid)!.navGrid;
+      const reach = grid ? grid.step * (grid.reach ?? 2.9) : Infinity;
       for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
         const a = this.nodes[ids[i]!]!, b = this.nodes[ids[j]!]!;
         if (vdist(a.pos, b.pos) <= reach && this.clear(a.pos, b.pos)) this.link(a.id, b.id);

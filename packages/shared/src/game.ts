@@ -28,6 +28,7 @@ import {
 } from './physicsWorld.js';
 import { dropOnDeath, populate, updatePickups } from './pickups.js';
 import { applyTierToVitals, resolveTier } from './power.js';
+import { findPowerupSpots, losePowerup, newPowerupState, powerupFlight, resetPowerups, updatePowerups, type PowerupState } from './powerups.js';
 import { Rng } from './rng.js';
 
 export interface GameSimOptions {
@@ -58,6 +59,7 @@ export class GameSim {
   projectiles: Projectile[] = [];
   missiles: Missile[] = [];
   pickups: Pickup[] = [];
+  powerups: PowerupState = newPowerupState();
   events: GameEvent[] = [];
   match: MatchState = newMatch();
   bots = new Map<number, BotBrain>();
@@ -86,6 +88,7 @@ export class GameSim {
     addArenaColliders(this.world, arena);
     this.world.step(); // build broadphase for queries
     finalizeSpawns(this.world, arena);
+    if (!arena.powerupSpots.length) arena.powerupSpots = findPowerupSpots(this.world, arena);
     this.nav = new NavGraph(this.world, arena);
     // after the nav graph, which routes around movers' swept volumes rather than their current poses
     this.movers = addMovers(this.world, arena, this.tick);
@@ -156,7 +159,7 @@ export class GameSim {
       primaryLastFire: -9999, secondaryLastFire: -9999, muzzleIndex: 0,
       abilityCooldown: 0, abilityActive: 0, repelCooldown: 0, cloaked: false, ambushReady: false, bulwarkHp: 0,
       sweepUntil: 0, sweepRevealed: new Set(), lock: { targetId: -1, progress: 0, locked: false }, secondaryHeld: false,
-      spawnProtectedUntil: 0, safe: false, safeCharge: SAFE_ZONE_CHARGE_S,
+      spawnProtectedUntil: 0, safe: false, safeCharge: SAFE_ZONE_CHARGE_S, powerup: null, powerupUntil: 0,
       deathTick: this.tick - RESPAWN_DELAY_S / DT, respawnAt: this.tick, holdSpawn: false, removeAtDeath: false,
       stats: { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 },
       damagers: new Set(), input: neutralInput(), prevFlags: 0, lagTicks: 0, lockWarn: 0, missileWarn: 0, poseHistory: [],
@@ -223,6 +226,7 @@ export class GameSim {
   }
 
   private despawn(s: Ship): void {
+    losePowerup(this, s, 'reset');
     if (s.body) {
       const b = s.body;
       for (let i = 0; i < b.numColliders(); i++) this.colliderShip.delete(b.collider(i).handle);
@@ -316,6 +320,7 @@ export class GameSim {
     }
     const pos = { ...victim.pos }, vel = { ...victim.vel };
     const dropped = dropOnDeath(this, victim, killer ? killer.id : -1);
+    losePowerup(this, victim, 'death');
     this.destroyOwned(victim.id);
     if (victim.cloaked) victim.cloaked = false;
     this.despawn(victim);
@@ -351,6 +356,7 @@ export class GameSim {
       s.stats = { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 };
       if (s.alive) this.despawn(s);
     }
+    resetPowerups(this);
     for (const s of this.shipList) this.spawnShip(s);
   }
 
@@ -424,7 +430,7 @@ export class GameSim {
       s.prevPos.x = s.pos.x; s.prevPos.y = s.pos.y; s.prevPos.z = s.pos.z;
       s.prevRot.x = s.rot.x; s.prevRot.y = s.rot.y; s.prevRot.z = s.rot.z; s.prevRot.w = s.rot.w;
       this.handleInput(s);
-      const res = applyFlightControl(s.body, s.input, s.def, s.flight, DT, { noBoostDrain: overdriveActive(s) });
+      const res = applyFlightControl(s.body, s.input, s.def, s.flight, DT, powerupFlight(overdriveActive(s), s.powerup));
       if (res.dodged) {
         for (const o of this.shipList) if (o.lock.targetId === s.id) { o.lock.progress = 0; o.lock.locked = false; o.lock.targetId = -1; }
         this.emit({ t: 'dodge', shipId: s.id });
@@ -458,6 +464,7 @@ export class GameSim {
     updateMissiles(this);
     for (const s of this.shipList) if (s.alive) this.updateTimers(s);
     updatePickups(this);
+    updatePowerups(this);
     populate(this);
 
     for (const s of this.shipList) { s.lockWarn = 0; s.missileWarn = 0; }

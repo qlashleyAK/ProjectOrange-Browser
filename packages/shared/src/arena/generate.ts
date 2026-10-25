@@ -18,7 +18,8 @@ export interface Segment { tunnel: Tunnel; index: number; a: V3; b: V3; axis: Ax
 export interface Elbow { tunnel: Tunnel; index: number; center: V3; box: Box; openings: { axis: Axis; sign: 1 | -1 }[] }
 /** `spacing` is the minimum gap to other pickups (default 25 m). */
 export interface OrangeRegion { id: string; box: Box; weight: number; bonus: boolean; spacing?: number }
-export interface SpawnPoint { pos: V3; facing: V3; room: string }
+/** `aimed`: the facing was hand-placed and survives spawn validation */
+export interface SpawnPoint { pos: V3; facing: V3; room: string; aimed?: boolean }
 
 export interface ArenaData {
   blueprint: Blueprint;
@@ -36,6 +37,8 @@ export interface ArenaData {
   /** every volume a mover can pass through, for keeping nav links, spawns and pickups out of the way */
   sweeps: Sweep[];
   safeZones: SafeZone[];
+  /** filled in against physics when a simulation first loads the map (powerups.ts) */
+  powerupSpots: V3[];
 }
 
 export function roomBox(r: Room): Box {
@@ -251,16 +254,20 @@ export function generateArena(bp: Blueprint): ArenaData {
       ...(stuffed ? { spacing: 8 } : {}),
     });
   }
+  for (const z of bp.oranges?.zones ?? []) {
+    regions.push({ id: z.id, box: { min: { ...z.min }, max: { ...z.max } }, weight: z.weight, bonus: false, ...(z.spacing ? { spacing: z.spacing } : {}) });
+  }
 
   // Spawn candidates (validated against physics in physicsWorld)
   const spawns: SpawnPoint[] = [];
   const safeZones = bp.safeZones ?? [];
-  for (const sp of safeZones.length ? [] : bp.spawns ?? []) {
+  for (const sp of bp.spawns ?? []) {
     const r = bp.rooms.find((x) => x.id === sp.room);
     if (!r) throw new Error(`Spawn references missing room ${sp.room}`);
-    spawns.push({ pos: { ...sp.pos }, facing: v3(r.center.x - sp.pos.x, 0, r.center.z - sp.pos.z), room: r.id });
+    if (sp.facing) spawns.push({ pos: { ...sp.pos }, facing: { ...sp.facing }, room: r.id, aimed: true });
+    else spawns.push({ pos: { ...sp.pos }, facing: v3(r.center.x - sp.pos.x, 0, r.center.z - sp.pos.z), room: r.id });
   }
-  for (const z of safeZones) {
+  for (const z of bp.spawns ? [] : safeZones) {
     const r = bp.rooms.find((x) => x.id === z.room);
     if (!r) continue;
     for (const deg of [90, 210, 330]) {
@@ -299,7 +306,7 @@ export function generateArena(bp: Blueprint): ArenaData {
 
   const movers = bp.movers ?? [];
   const sweeps = movers.flatMap(moverSweeps);
-  return { blueprint: bp, slabs, doorways, segments, elbows, regions, spawns, roomBoxes, adjacency, bounds, movers, sweeps, safeZones };
+  return { blueprint: bp, slabs, doorways, segments, elbows, regions, spawns, roomBoxes, adjacency, bounds, movers, sweeps, safeZones, powerupSpots: [] };
 }
 
 /** Distance from a point to the nearest point of a box (0 inside). */
@@ -377,6 +384,13 @@ export function validateArenaGeometry(a: ArenaData): string[] {
     const rb = a.roomBoxes.get(p.room);
     if (!rb) { errors.push(`prop in unknown room ${p.room}`); continue; }
     if (!boxContains(rb, p.center, 0.5)) errors.push(`prop ${p.kind} outside room ${p.room}`);
+    if (p.kind === 'limb') {
+      if (p.points.length < 2 || p.radii.length !== p.points.length) errors.push(`limb in ${p.room} needs matching points and radii`);
+      else if (p.points.some((q, i) => {
+        const r = p.radii[i]!;
+        return q.x - r < rb.min.x || q.x + r > rb.max.x || q.z - r < rb.min.z || q.z + r > rb.max.z || q.y + r > rb.max.y;
+      })) errors.push(`limb pokes out of room ${p.room}`);
+    }
     if (p.spin && p.collides) errors.push(`spinning ${p.kind} in ${p.room} must not collide`);
   }
   for (const s of a.spawns) if (!boxContains(a.roomBoxes.get(s.room)!, s.pos)) errors.push(`spawn outside room ${s.room}`);

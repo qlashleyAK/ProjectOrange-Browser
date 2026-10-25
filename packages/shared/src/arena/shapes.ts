@@ -1,3 +1,4 @@
+import { v3, type V3 } from '../math.js';
 import { Rng } from '../rng.js';
 
 /** Icosphere vertices (subdivided once, 42 verts), unit radius. */
@@ -75,6 +76,44 @@ export function spikePoints(length: number, radius: number, seed: number): numbe
     }
   }
   out.push(rng.range(-0.15, 0.15) * radius, length, rng.range(-0.15, 0.15) * radius);
+  return out;
+}
+
+export interface Capsule { a: V3; b: V3; r: number }
+
+/** One capsule per span of a limb, at the larger end's radius. */
+export function limbCapsules(points: V3[], radii: number[]): Capsule[] {
+  const out: Capsule[] = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i]!, b = points[i + 1]!;
+    if (Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) < 1e-3) continue;
+    out.push({ a, b, r: Math.max(radii[i]!, radii[i + 1]!) });
+  }
+  return out;
+}
+
+/** Perpendicular unit axes (u horizontal) around a hollow log's axis `d`. */
+export function logFrame(dir: V3): { d: V3; u: V3; w: V3 } {
+  const l = Math.hypot(dir.x, dir.y, dir.z) || 1;
+  const d = v3(dir.x / l, dir.y / l, dir.z / l);
+  const ul = Math.hypot(d.z, d.x) || 1;
+  const u = v3(-d.z / ul, 0, d.x / ul);
+  const w = v3(u.y * d.z - u.z * d.y, u.z * d.x - u.x * d.z, u.x * d.y - u.y * d.x);
+  return { d, u, w };
+}
+
+/** Capsule staves standing in for a hollow log's wall, overlapping so nothing slips between them. */
+export function logStaves(center: V3, dir: V3, length: number, outer: number, inner: number): Capsule[] {
+  const r = (outer - inner) / 2, mid = (outer + inner) / 2;
+  const n = Math.ceil(Math.PI / Math.asin(Math.min(1, (r * 0.85) / mid)));
+  const { d, u, w } = logFrame(dir);
+  const h = length / 2 - r;
+  const out: Capsule[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2, c = Math.cos(t) * mid, s = Math.sin(t) * mid;
+    const o = v3(center.x + u.x * c + w.x * s, center.y + u.y * c + w.y * s, center.z + u.z * c + w.z * s);
+    out.push({ a: v3(o.x - d.x * h, o.y - d.y * h, o.z - d.z * h), b: v3(o.x + d.x * h, o.y + d.y * h, o.z + d.z * h), r });
+  }
   return out;
 }
 
