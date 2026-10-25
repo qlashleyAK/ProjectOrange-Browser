@@ -16,7 +16,8 @@ export interface Doorway {
 }
 export interface Segment { tunnel: Tunnel; index: number; a: V3; b: V3; axis: Axis; box: Box }
 export interface Elbow { tunnel: Tunnel; index: number; center: V3; box: Box; openings: { axis: Axis; sign: 1 | -1 }[] }
-export interface OrangeRegion { id: string; box: Box; weight: number; bonus: boolean }
+/** `spacing` is the minimum gap to other pickups (default 25 m). */
+export interface OrangeRegion { id: string; box: Box; weight: number; bonus: boolean; spacing?: number }
 export interface SpawnPoint { pos: V3; facing: V3; room: string }
 
 export interface ArenaData {
@@ -233,22 +234,32 @@ export function generateArena(bp: Blueprint): ArenaData {
 
   // Orange regions (Section 15.6)
   const regions: OrangeRegion[] = [];
+  const roomWeight = bp.oranges?.roomWeight ?? 1;
   for (const r of bp.rooms) {
     const b = roomBox(r);
     const box: Box = { min: v3(b.min.x + 12, b.min.y + 12, b.min.z + 12), max: v3(b.max.x - 12, b.max.y - 12, b.max.z - 12) };
     const vol = (box.max.x - box.min.x) * (box.max.y - box.min.y) * (box.max.z - box.min.z);
-    regions.push({ id: r.id, box, weight: Math.sqrt(vol) / 100, bonus: false });
+    regions.push({ id: r.id, box, weight: (Math.sqrt(vol) / 100) * roomWeight, bonus: false });
   }
   for (const s of segments) {
     const len = getA(s.box.max, s.axis) - getA(s.box.min, s.axis);
-    if (len <= 60) continue;
+    const stuffed = s.tunnel.oranges !== undefined;
+    if (len <= (stuffed ? 20 : 60)) continue;
     const box: Box = { min: v3(s.box.min.x + 4, s.box.min.y + 4, s.box.min.z + 4), max: v3(s.box.max.x - 4, s.box.max.y - 4, s.box.max.z - 4) };
-    regions.push({ id: `${s.tunnel.id}#${s.index}`, box, weight: 1.0, bonus: !!s.tunnel.bonus });
+    regions.push({
+      id: `${s.tunnel.id}#${s.index}`, box, weight: s.tunnel.oranges ?? 1.0, bonus: !!s.tunnel.bonus,
+      ...(stuffed ? { spacing: 8 } : {}),
+    });
   }
 
   // Spawn candidates (validated against physics in physicsWorld)
   const spawns: SpawnPoint[] = [];
   const safeZones = bp.safeZones ?? [];
+  for (const sp of safeZones.length ? [] : bp.spawns ?? []) {
+    const r = bp.rooms.find((x) => x.id === sp.room);
+    if (!r) throw new Error(`Spawn references missing room ${sp.room}`);
+    spawns.push({ pos: { ...sp.pos }, facing: v3(r.center.x - sp.pos.x, 0, r.center.z - sp.pos.z), room: r.id });
+  }
   for (const z of safeZones) {
     const r = bp.rooms.find((x) => x.id === z.room);
     if (!r) continue;
@@ -258,7 +269,7 @@ export function generateArena(bp: Blueprint): ArenaData {
       spawns.push({ pos, facing: v3(r.center.x - pos.x, 0, r.center.z - pos.z), room: r.id });
     }
   }
-  for (const r of safeZones.length ? [] : bp.rooms) {
+  for (const r of safeZones.length || bp.spawns ? [] : bp.rooms) {
     const dirs: V3[] = [v3(1, 0, 0), v3(-1, 0, 0), v3(0, 0, 1), v3(0, 0, -1), v3(1, 0, 1), v3(-1, 0, -1), v3(1, 0, -1), v3(-1, 0, 1)];
     const doorFaces = doorways.filter((d) => d.room === r && d.axis !== 1).map((d) => ({ axis: d.axis, side: d.side }));
     const scored = dirs.map((d, i) => {
@@ -366,7 +377,9 @@ export function validateArenaGeometry(a: ArenaData): string[] {
     const rb = a.roomBoxes.get(p.room);
     if (!rb) { errors.push(`prop in unknown room ${p.room}`); continue; }
     if (!boxContains(rb, p.center, 0.5)) errors.push(`prop ${p.kind} outside room ${p.room}`);
+    if (p.spin && p.collides) errors.push(`spinning ${p.kind} in ${p.room} must not collide`);
   }
+  for (const s of a.spawns) if (!boxContains(a.roomBoxes.get(s.room)!, s.pos)) errors.push(`spawn outside room ${s.room}`);
   // movers: sweeping against walls, doors and each other is checked with physics (validateMovers)
   for (const m of a.movers) {
     const rb = a.roomBoxes.get(m.room);

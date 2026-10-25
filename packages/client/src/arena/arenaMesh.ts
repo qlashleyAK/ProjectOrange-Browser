@@ -8,7 +8,7 @@ import {
 } from '@orange/shared';
 import { ArenaMaterials } from './materials';
 
-export interface RoomLightSpec { room: string; pos: THREE.Vector3; color: THREE.Color; intensity: number; distance: number }
+export interface RoomLightSpec { room: string; pos: THREE.Vector3; color: THREE.Color; intensity: number; distance: number; decay: number }
 
 export interface ArenaView {
   group: THREE.Group;
@@ -92,6 +92,9 @@ function propGeometry(p: Prop): THREE.BufferGeometry | null {
   switch (p.kind) {
     case 'box':
       g = p.rounded ? new RoundedBoxGeometry(p.size.x, p.size.y, p.size.z, 2, p.rounded) : new THREE.BoxGeometry(p.size.x, p.size.y, p.size.z);
+      // same order as boxRotation in shared: Z tilt, X tilt, Y turn
+      if (p.rotZ) g.rotateZ(p.rotZ);
+      if (p.rotX) g.rotateX(p.rotX);
       if (p.rotY) g.rotateY(p.rotY);
       break;
     case 'cylinder':
@@ -149,11 +152,29 @@ function signTexture(text: string, color: THREE.Color, arrow: 'none' | 'right'):
   ctx.textAlign = arrow === 'right' ? 'left' : 'center';
   const label = text.toUpperCase();
   if (arrow === 'right') {
-    ctx.fillText(label, 24, 50);
+    ctx.fillText(label, 24, 50, 360);
     ctx.beginPath();
     for (const x of [400, 440]) { ctx.moveTo(x, 18); ctx.lineTo(x + 34, 48); ctx.lineTo(x, 78); }
     ctx.lineWidth = 10; ctx.stroke();
-  } else ctx.fillText(label, c.width / 2, 50);
+  } else ctx.fillText(label, c.width / 2, 50, c.width - 40);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Square painted level marker: a colored band with big text. */
+function levelTexture(text: string, color: THREE.Color): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const css = `#${color.getHexString()}`;
+  ctx.fillStyle = css;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = 'rgb(18,20,24)';
+  ctx.font = 'bold 150px system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 136, 236);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -194,16 +215,34 @@ export function buildArena(arena: ArenaData): ArenaView {
 
   // walls
   for (const s of arena.slabs) {
-    const floorCeil = s.face.axis === 1;
+    const part = s.face.axis !== 1 ? 'wall' : s.face.normalSign > 0 ? 'floor' : 'ceiling';
     const displace = s.theme === 'rock';
-    addGeom(s.owner, mats.wall(s.theme, floorCeil), faceGeometry(s, displace));
+    const room = rooms.get(s.owner);
+    const floorY = room ? room.center.y - room.size.y / 2 : 0;
+    addGeom(s.owner, mats.wall(s.theme, part, floorY), faceGeometry(s, displace));
   }
 
-  // props
+  // props: static ones merge per material; spinning and pulsing ones keep their own mesh
+  const spinners: { mesh: THREE.Mesh; rate: number }[] = [];
   for (const p of arena.blueprint.props) {
     const g = propGeometry(p);
     if (!g) continue;
-    const m = mats.prop(p.material, p.emissive);
+    if (p.pulse) {
+      const base = new THREE.Color(p.emissive ?? 0xffffff).multiplyScalar(3);
+      const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: base.clone() }));
+      animated.push({ mesh, kind: 'pulse', base, speed: p.pulse });
+      addObj(p.room, mesh);
+      continue;
+    }
+    const m = mats.prop(p.material, p.emissive, false, p.color);
+    if (p.spin) {
+      g.translate(-p.center.x, -p.center.y, -p.center.z);
+      const mesh = new THREE.Mesh(g, m);
+      mesh.position.set(p.center.x, p.center.y, p.center.z);
+      spinners.push({ mesh, rate: p.spin });
+      addObj(p.room, mesh);
+      continue;
+    }
     addGeom(p.room, m, g);
   }
 
@@ -215,7 +254,7 @@ export function buildArena(arena: ArenaData): ArenaView {
       const g = propGeometry(p);
       if (!g) continue;
       g.translate(-m.origin.x, -m.origin.y, -m.origin.z);
-      const mat = mats.prop(p.material, p.emissive, true);
+      const mat = mats.prop(p.material, p.emissive, true, p.color);
       let arr = byMat.get(mat);
       if (!arr) { arr = []; byMat.set(mat, arr); }
       arr.push(g);
@@ -382,7 +421,55 @@ export function buildArena(arena: ArenaData): ArenaView {
     }
   }
 
+  // building floors: hazard rims around the shaft holes in floors and ceilings
+  const rim = mats.prop('hazard');
+  for (const d of arena.doorways) {
+    if (d.axis !== 1 || !['office', 'garage', 'roof'].includes(d.room.theme)) continue;
+    const hs = d.size / 2, bar = 2.5;
+    const c = new THREE.Vector3(d.center.x, d.center.y + d.inward.y * 0.35, d.center.z);
+    for (const [ax, sg] of [[0, 1], [0, -1], [2, 1], [2, -1]] as [0 | 2, number][]) {
+      const other = ax === 0 ? 2 : 0;
+      const center = c.clone(); center.setComponent(ax, center.getComponent(ax) + sg * (hs + bar / 2 + 1.2));
+      const size = new THREE.Vector3(); size.setComponent(1, 0.7); size.setComponent(ax, bar); size.setComponent(other, d.size + bar * 2 + 2.4);
+      addGeom(d.room.id, rim, boxAt(center, size));
+    }
+  }
+  // elevator shafts: a pair of guide rails up opposite walls
+  const railMat = mats.prop('darkMetal');
+  for (const s of arena.segments) {
+    if (s.tunnel.theme !== 'shaft' || s.axis !== 1) continue;
+    const hs = s.tunnel.side / 2, len = s.box.max.y - s.box.min.y;
+    const mid = new THREE.Vector3((s.box.min.x + s.box.max.x) / 2, (s.box.min.y + s.box.max.y) / 2, (s.box.min.z + s.box.max.z) / 2);
+    for (const sg of [-1, 1]) addGeom(s.tunnel.id, railMat, boxAt(new THREE.Vector3(mid.x, mid.y, mid.z + sg * (hs - 0.4)), new THREE.Vector3(1, len, 0.8)));
+  }
+
   // room-specific cosmetics
+  const garage = rooms.get('garage');
+  if (garage) {
+    // level markers on every face of every full-height pillar
+    const floorY = garage.center.y - garage.size.y / 2;
+    const mat = new THREE.MeshBasicMaterial({ map: levelTexture('P2', new THREE.Color(garage.landmark)), color: new THREE.Color(1.4, 1.4, 1.4) });
+    const planes: THREE.BufferGeometry[] = [];
+    for (const p of arena.blueprint.props) {
+      if (p.room !== 'garage' || p.kind !== 'box' || p.material !== 'concrete' || p.size.y !== garage.size.y) continue;
+      for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const g = new THREE.PlaneGeometry(5, 5);
+        g.rotateY(Math.atan2(nx, nz));
+        g.translate(p.center.x + nx * (p.size.x / 2 + 0.08), floorY + 11, p.center.z + nz * (p.size.z / 2 + 0.08));
+        planes.push(g);
+      }
+    }
+    const merged = planes.length ? mergeGeometries(planes, false) : null;
+    for (const g of planes) g.dispose();
+    if (merged) { merged.computeBoundingSphere(); addObj('garage', new THREE.Mesh(merged, mat)); }
+  }
+  const exec = rooms.get('exec');
+  if (exec) {
+    const logo = signMesh('Meridian', exec.landmark, 'none', 30);
+    logo.rotation.y = -Math.PI / 2;
+    logo.position.set(exec.center.x - 104.85, exec.center.y - exec.size.y / 2 + 21, exec.center.z);
+    addObj('exec', logo);
+  }
   const dock = rooms.get('dock');
   if (dock) {
     const padMat = mats.glow(0x3f8cff, 2.5);
@@ -488,8 +575,17 @@ export function buildArena(arena: ArenaData): ArenaView {
   for (const r of arena.blueprint.rooms) {
     const big = Math.max(r.size.x, r.size.y, r.size.z);
     const wide = Math.max(r.size.x, r.size.z);
-    const color = new THREE.Color(r.landmark);
+    const color = new THREE.Color(r.light?.color ?? r.landmark);
+    const scale = r.light?.scale ?? 1;
     const at = (x: number, y: number, z: number) => new THREE.Vector3(r.center.x + x, r.center.y + y, r.center.z + z);
+    if (r.size.y < 0.3 * wide) {
+      // a low floor plate: the ceiling is too close for one bright lamp, so four at mid-height with 1/d
+      // falloff stand in for a ceiling full of fixtures and light it evenly
+      for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {
+        lights.push({ room: r.id, pos: at(sx * r.size.x * 0.27, 0, sz * r.size.z * 0.27), color, intensity: 1.5 * r.size.y * scale, distance: wide * 1.2, decay: 1 });
+      }
+      continue;
+    }
     const pts: THREE.Vector3[] = r.id === 'hub'
       ? [at(30, 30, 30), at(-30, -25, -30)]
       : r.size.y > 1.5 * wide
@@ -497,7 +593,7 @@ export function buildArena(arena: ArenaData): ArenaView {
         : wide >= 200
           ? [at(r.size.x * 0.25, r.size.y * 0.3, r.size.z * 0.25), at(-r.size.x * 0.25, r.size.y * 0.3, -r.size.z * 0.25)]
           : [at(0, r.size.y * 0.3, 0)];
-    for (const p of pts) lights.push({ room: r.id, pos: p, color, intensity: big * big * 0.9 / pts.length, distance: big * 1.6 });
+    for (const p of pts) lights.push({ room: r.id, pos: p, color, intensity: (big * big * 0.9 * scale) / pts.length, distance: big * 1.6, decay: 2 });
   }
 
   const pvsCache = new Map<string, Set<string>>();
@@ -548,6 +644,7 @@ export function buildArena(arena: ArenaData): ArenaView {
         m.group.quaternion.set(_mq.x, _mq.y, _mq.z, _mq.w);
       }
       for (const s of shellMats) s.uniforms.uTime!.value = t;
+      for (const s of spinners) s.mesh.rotation.y = t * s.rate;
     },
     dispose() {
       group.traverse((o) => {

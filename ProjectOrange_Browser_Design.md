@@ -1502,7 +1502,9 @@ small generated impulse responses):
 
 Tunnels use a short tight reverb. Other maps pick the ambience by room theme
 (refinery → Crucible, industrial → Foundry, hangar → Dock, reactor → Reactor,
-rock → Gallery, machinery → Crusher).
+rock → Gallery, machinery → Crusher, office → Crucible, garage → Gallery,
+shaft → tunnel). The rooftop gets its own **wind** loop (gusting band-passed
+howl over a low rumble) with an open, nearly dry reverb.
 
 ### 15.8 Second map: "The Gyre" (`shared/arena/gyre.ts`)
 
@@ -1554,6 +1556,58 @@ radius 28 m, one per outer hall.
 - Clients see a fresnel shell with scan bands, plus a ring and "SAFE ZONE"
   sign on the nearest wall. Safe ships wear a mint bubble; remote ships carry
   `ShipFlag.Safe`, and the owner snapshot carries `safeCharge`.
+
+### 15.9 Third map: "Meridian Tower" (`shared/arena/tower.ts`)
+
+An abandoned high-rise. Four stacked floor plates are the fighting areas, and
+the vertical shafts between them are stuffed with oranges, so the power race
+happens in the risky, cover-less links rather than on the floors.
+
+| Floor (top to bottom) | Size (m) | Theme | Cover |
+|---|---|---|---|
+| Rooftop | 340 × 130 × 260 | roof | nothing but the AC unit (46 × 16 × 26 cabinet, two spinning fans, a duct) and knee-high vents; helipad, red beacon mast |
+| Executive Floor | 340 × 50 × 260 | office | private offices along both long walls, a walled boardroom, L-shaped screens, reception desk and MERIDIAN wall, server room with racks |
+| Cubicle Farm | 340 × 50 × 260 | office | plus-shaped cubicle pods on a 46 m grid (some walls missing, fallen or leaning), desks, columns |
+| Parking Garage (P2) | 340 × 40 × 260 | garage | 28 concrete pillars with hazard wraps, beams, parked cars, an up-ramp |
+
+- **Shafts:** six 26 m square corner shafts link each pair of adjacent floors.
+  There are two per pair, at opposite corners, and the corners alternate from
+  pair to pair, so each floor's exits never line up. Two bonus freight shafts
+  (west: garage ↔ executive, east: cubicles ↔ roof) skip a floor through the
+  outer wall. Every pair of floors has at least 3 routes.
+- **Orange stuffing:** a tunnel can set `oranges` (a region weight per
+  segment). Stuffed segments count even when short (≥ 20 m) and pack oranges
+  8 m apart instead of 25 m. The blueprint's `oranges` block scales the world
+  target ×2.5 (capped at 64) and weights room regions ×0.05. About 80% of the
+  spawn weight sits in the six corner shafts. With 6 bots, about 40 live
+  oranges, mostly in shafts.
+- **Spawns:** explicit (`blueprint.spawns`), 3 per floor, each 12 m clear.
+- **The sky:** the rooftop's walls and ceiling are a black box with stars
+  painted in world space. You can see them coming; a faint blue grid fades in
+  within 70 m of a wall. Office windows are panes onto the same night,
+  starred by view direction (infinitely far) and black below the horizon.
+  Stars are at most one per cell and never shrink below a pixel: they dim
+  instead of sparkling.
+- **Surfaces:** new triplanar surfaces: concrete (pores, rain streaks,
+  seams, optional oil stains), plaster (damp patches), carpet (filtered
+  checker), drop-ceiling tiles (T-bars, 10% missing), roofing membrane
+  (sheets, seams, puddles) and fabric. Floor markings use a `paint`
+  material with a touch of self-light.
+- **Lighting:** a room lower than 30% of its width gets four lights at
+  mid-height in its quadrants with 1/d falloff, standing in for a ceiling
+  full of fixtures. One bright lamp under a close ceiling would blow it out.
+  About a third of the office ceiling panels still work (two thirds in the
+  garage); some dead ones hang by a corner.
+- **Engine extensions:**
+  - boxes can tilt (`rotX`, `rotZ`) for fallen walls, ramps and hanging
+    panels;
+  - props can `spin` (rad/s about Y) or `pulse` (Hz); both are visual only,
+    and a spinning prop must not collide;
+  - rooms can override their light color and scale, and lay nav nodes on a
+    grid (`navGrid`) with short in-room links so bots path around cubicles
+    and pillars;
+  - the client precompiles every zone's shaders when a map loads, rather
+    than stalling the first time each floor comes into view.
 
 ---
 

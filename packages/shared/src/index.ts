@@ -12,6 +12,7 @@ export * from './arena/generate.js';
 export * from './arena/shapes.js';
 export * from './arena/movers.js';
 export * from './arena/gyre.js';
+export * from './arena/tower.js';
 export * from './arena/registry.js';
 export * from './combat/weapons.js';
 export * from './combat/hitVolumes.js';

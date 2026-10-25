@@ -202,7 +202,8 @@ export function renderMenuMusic(): [Float32Array, Float32Array] {
 }
 
 // ------------------------------------------------------------------ ambience & reverbs
-export type AmbienceId = 'hub' | 'foundry' | 'dock' | 'reactor' | 'gallery' | 'crusher' | 'tunnel';
+export type AmbienceId = 'hub' | 'foundry' | 'dock' | 'reactor' | 'gallery' | 'crusher' | 'tunnel' | 'wind';
+export const AMBIENCES: AmbienceId[] = ['hub', 'foundry', 'dock', 'reactor', 'gallery', 'crusher', 'tunnel', 'wind'];
 
 export function renderAmbience(id: AmbienceId): Float32Array {
   const len = 6;
@@ -233,11 +234,20 @@ export function renderAmbience(id: AmbienceId): Float32Array {
     }
     case 'crusher': return normalize(softClip(mix(bandpass(noiseBurst(len, (t) => 0.6 + 0.4 * Math.sin(t * Math.PI * 2 * 1.5)), 260, 2), [osc(len, () => 47, 'saw', () => 0.3), 0.4]), 1.5), 0.35);
     case 'tunnel': return normalize(lowpass(noiseBurst(len, () => 1), 250), 0.22);
+    case 'wind': {
+      // gusts swell on periods that divide the loop length, so the loop seam stays silent
+      const gust = (t: number) => 0.55 + 0.3 * Math.sin((t / len) * Math.PI * 2) + 0.15 * Math.sin((t / len) * Math.PI * 6 + 1);
+      const howl = bandpass(noiseBurst(len, gust), (t) => 420 + 160 * Math.sin((t / len) * Math.PI * 4), 1.2);
+      return normalize(mix(howl, [lowpass(noiseBurst(len, () => 1), 140), 0.5]), 0.3);
+    }
   }
 }
 
-export type ReverbId = 'hall' | 'metal' | 'hangar' | 'reactor' | 'cave' | 'machinery' | 'tight';
-export const REVERB_OF: Record<AmbienceId, ReverbId> = { hub: 'hall', foundry: 'metal', dock: 'hangar', reactor: 'reactor', gallery: 'cave', crusher: 'machinery', tunnel: 'tight' };
+export type ReverbId = 'hall' | 'metal' | 'hangar' | 'reactor' | 'cave' | 'machinery' | 'tight' | 'open';
+export const REVERBS: ReverbId[] = ['hall', 'metal', 'hangar', 'reactor', 'cave', 'machinery', 'tight', 'open'];
+export const REVERB_OF: Record<AmbienceId, ReverbId> = {
+  hub: 'hall', foundry: 'metal', dock: 'hangar', reactor: 'reactor', gallery: 'cave', crusher: 'machinery', tunnel: 'tight', wind: 'open',
+};
 export function renderReverb(id: ReverbId): [Float32Array, Float32Array] {
   switch (id) {
     case 'hall': return impulseResponse(2.6, 3, 5000);
@@ -247,5 +257,6 @@ export function renderReverb(id: ReverbId): [Float32Array, Float32Array] {
     case 'cave': return impulseResponse(2.4, 2.2, 6000);
     case 'machinery': return impulseResponse(1.1, 2.5, 5000);
     case 'tight': return impulseResponse(0.5, 3, 7000);
+    case 'open': return impulseResponse(0.35, 5, 6000);
   }
 }

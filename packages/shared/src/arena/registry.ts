@@ -1,12 +1,14 @@
 import { hollowdeep, type Blueprint } from './blueprint.js';
 import { generateArena, type ArenaData } from './generate.js';
 import { gyre } from './gyre.js';
+import { tower } from './tower.js';
 
 export interface ArenaInfo { id: string; name: string; blurb: string; blueprint: () => Blueprint }
 
 export const ARENAS: ArenaInfo[] = [
   { id: 'hollowdeep', name: 'Hollowdeep Mine', blurb: 'Six tight rooms, tunnels and a sewer', blueprint: hollowdeep },
   { id: 'gyre', name: 'The Gyre', blurb: 'Five huge halls, moving machinery, safe-zone spawns', blueprint: gyre },
+  { id: 'tower', name: 'Meridian Tower', blurb: 'Abandoned high-rise: four floors, orange-stuffed shafts', blueprint: tower },
 ];
 export const DEFAULT_ARENA = 'hollowdeep';
 

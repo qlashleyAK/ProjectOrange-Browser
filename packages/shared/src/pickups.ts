@@ -1,4 +1,4 @@
-import { safeZoneAt, type OrangeRegion } from './arena/generate.js';
+import { safeZoneAt, type ArenaData, type OrangeRegion } from './arena/generate.js';
 import { moverClearance } from './arena/movers.js';
 import {
   DROP_CAP, DROP_LIFETIME_S, DROP_RING_RADIUS, DT, MAGNET_RADIUS, MAGNET_SPEED, MAX_POWER, PICKUP_RADIUS,
@@ -62,22 +62,29 @@ function pickRegion(sim: GameSim): OrangeRegion {
   return regions[regions.length - 1]!;
 }
 
+/** World orange target for a map, after its blueprint's scale and cap. */
+export function orangeTarget(arena: ArenaData, activePlayers: number): number {
+  const base = worldOrangeTarget(activePlayers), o = arena.blueprint.oranges;
+  return o ? Math.min(o.cap, Math.round(base * o.scale)) : base;
+}
+
 /** World population: every 1 s spawn up to 2 toward the target (Section 6.6). */
 export function populate(sim: GameSim): void {
   if (sim.match.phase !== 'inProgress' || sim.tick % 60 !== 0) return;
   const active = sim.shipList.length;
-  const target = worldOrangeTarget(active);
+  const target = orangeTarget(sim.arena, active);
   let live = sim.pickups.filter((p) => !p.drop).length;
   for (let n = 0; n < 2 && live < target; n++) {
     const region = pickRegion(sim);
     sim.lastOrangeRegion = region.id;
+    const gap = region.spacing ?? 25;
     for (let tries = 0; tries < 12; tries++) {
       const b = region.box;
       const p = v3(sim.rng.range(b.min.x, b.max.x), sim.rng.range(b.min.y, b.max.y), sim.rng.range(b.min.z, b.max.z));
       if (!sphereFree(sim.world, p, 1.5)) continue;
       if (safeZoneAt(sim.arena, p) || moverClearance(sim.arena.sweeps, p) < 4) continue;
       if (sim.shipList.some((s) => s.alive && vdistSq(s.pos, p) < 60 * 60)) continue;
-      if (sim.pickups.some((q) => vdistSq(q.pos, p) < 25 * 25)) continue;
+      if (sim.pickups.some((q) => vdistSq(q.pos, p) < gap * gap)) continue;
       if (sim.arena.spawns.some((sp) => vdistSq(sp.pos, p) < 40 * 40)) continue;
       if (sim.combatLog.some((c) => sim.tick - c.tick < 8 * 60 && vdistSq(c.pos, p) < 50 * 50)) continue;
       spawnPickup(sim, p, region.bonus ? 2 : 1, false);

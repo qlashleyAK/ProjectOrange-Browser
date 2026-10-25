@@ -40,17 +40,32 @@ export class NavGraph {
     const roomNodes = new Map<string, number[]>();
     for (const r of arena.blueprint.rooms) {
       const ids: number[] = [];
-      const c = r.center, s = r.size;
-      const pts: V3[] = [v3(c.x, c.y, c.z)];
-      for (const fx of [-0.28, 0.28]) for (const fz of [-0.28, 0.28]) for (const fy of [-0.22, 0.22]) {
-        pts.push(v3(c.x + s.x * fx, c.y + s.y * fy, c.z + s.z * fz));
-      }
-      if (s.y > 150) for (const fy of [-0.42, -0.2, 0.2, 0.42]) for (const [fx, fz] of [[0.32, 0], [-0.32, 0], [0, 0.32], [0, -0.32]] as const) {
-        pts.push(v3(c.x + s.x * fx, c.y + s.y * fy, c.z + s.z * fz));
+      const c = r.center, s = r.size, grid = r.navGrid;
+      const pts: V3[] = [];
+      if (grid) {
+        const nx = Math.max(1, Math.floor(s.x / grid.step)), nz = Math.max(1, Math.floor(s.z / grid.step));
+        for (const y of grid.ys) for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+          pts.push(v3(c.x + (i - (nx - 1) / 2) * grid.step, c.y + y, c.z + (k - (nz - 1) / 2) * grid.step));
+        }
+      } else {
+        pts.push(v3(c.x, c.y, c.z));
+        for (const fx of [-0.28, 0.28]) for (const fz of [-0.28, 0.28]) for (const fy of [-0.22, 0.22]) {
+          pts.push(v3(c.x + s.x * fx, c.y + s.y * fy, c.z + s.z * fz));
+        }
+        if (s.y > 150) for (const fy of [-0.42, -0.2, 0.2, 0.42]) for (const [fx, fz] of [[0.32, 0], [-0.32, 0], [0, 0.32], [0, -0.32]] as const) {
+          pts.push(v3(c.x + s.x * fx, c.y + s.y * fy, c.z + s.z * fz));
+        }
       }
       for (const p of pts) {
         let id = this.add(p, r.id);
-        if (id < 0) {
+        if (id < 0 && grid) {
+          // a quarter step to either side, so the grid stays regular
+          const q = grid.step / 4;
+          for (const [dx, dz] of [[q, 0], [-q, 0], [0, q], [0, -q]] as const) {
+            id = this.add(v3(p.x + dx, p.y, p.z + dz), r.id);
+            if (id >= 0) break;
+          }
+        } else if (id < 0) {
           // nudge toward the walls/center until free
           for (const k of [0.8, 1.2, 0.6, 1.4]) {
             id = this.add(v3(c.x + (p.x - c.x) * k, p.y, c.z + (p.z - c.z) * k), r.id);
@@ -80,11 +95,13 @@ export class NavGraph {
       }
       this.link(prev, doorNodes.get(`${t.id}:b`)!.door);
     }
-    // in-room visibility links
-    for (const ids of roomNodes.values()) {
+    // in-room visibility links (grid rooms only link near neighbors)
+    for (const [rid, ids] of roomNodes) {
+      const step = arena.blueprint.rooms.find((r) => r.id === rid)!.navGrid?.step;
+      const reach = step ? step * 2.9 : Infinity;
       for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
         const a = this.nodes[ids[i]!]!, b = this.nodes[ids[j]!]!;
-        if (this.clear(a.pos, b.pos)) this.link(a.id, b.id);
+        if (vdist(a.pos, b.pos) <= reach && this.clear(a.pos, b.pos)) this.link(a.id, b.id);
       }
     }
   }

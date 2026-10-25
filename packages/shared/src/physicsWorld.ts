@@ -1,5 +1,5 @@
 import * as RAPIER from '@dimforge/rapier3d-deterministic-compat';
-import type { Mover, Prop } from './arena/blueprint.js';
+import { boxRotation, type Mover, type Prop } from './arena/blueprint.js';
 import { crystalPoints, pillarPoints, rockPoints } from './arena/shapes.js';
 import { boxContains, boxDistance, doorClearanceBox, getA, type ArenaData, type Axis } from './arena/generate.js';
 import { moverPose, posedSpheres } from './arena/movers.js';
@@ -47,7 +47,7 @@ function propCollider(p: Prop, origin: V3): RAPIER.ColliderDesc | null {
   switch (p.kind) {
     case 'box':
       d = RAPIER.ColliderDesc.cuboid(p.size.x / 2, p.size.y / 2, p.size.z / 2);
-      if (p.rotY) qfromAxisAngle(rot, Y_UP, p.rotY);
+      boxRotation(p, rot);
       break;
     case 'cylinder':
       d = RAPIER.ColliderDesc.cylinder(p.height / 2, p.radius);

@@ -1,19 +1,36 @@
-import { v3, type V3 } from '../math.js';
+import { q4, qfromAxisAngle, qmul, v3, type Q4, type V3 } from '../math.js';
 import { Rng } from '../rng.js';
 
-export type Theme = 'refinery' | 'industrial' | 'hangar' | 'reactor' | 'rock' | 'machinery' | 'tunnel' | 'sewer';
-export type PropMaterial = 'metal' | 'darkMetal' | 'rock' | 'crystal' | 'emissive' | 'hazard';
+export type Theme =
+  | 'refinery' | 'industrial' | 'hangar' | 'reactor' | 'rock' | 'machinery' | 'tunnel' | 'sewer'
+  | 'office' | 'garage' | 'roof' | 'shaft';
+/** `sky` is a visual-only window onto the night sky; `color` tints paint and fabric. */
+export type PropMaterial =
+  | 'metal' | 'darkMetal' | 'rock' | 'crystal' | 'emissive' | 'hazard'
+  | 'concrete' | 'plaster' | 'fabric' | 'paint' | 'sky';
 
 export interface Room {
   id: string; name: string; center: V3; size: V3; wall: number; landmark: number; theme: Theme;
+  /** room light color and intensity scale, when it shouldn't be the landmark color at full strength */
+  light?: { color: number; scale: number };
+  /** bot nav nodes on an xz grid of `step` meters at each height offset from the center, linked to near neighbors only */
+  navGrid?: { step: number; ys: number[] };
 }
 export interface Tunnel {
   id: string; a: string; b: string; side: number; path: V3[]; theme: Theme; bonus?: boolean; label?: string;
+  /** orange-spawn weight of every segment, packed 8 m apart instead of 25 m */
+  oranges?: number;
 }
 
-interface PropBase { room: string; collides: boolean; material: PropMaterial; emissive?: number }
+interface PropBase {
+  room: string; collides: boolean; material: PropMaterial; emissive?: number; color?: number;
+  /** visual-only spin about the world Y axis through `center`, in rad/s */
+  spin?: number;
+  /** visual-only slow brightness pulse of an emissive prop, in Hz */
+  pulse?: number;
+}
 export type Prop = PropBase & (
-  | { kind: 'box'; center: V3; size: V3; rotY?: number; rounded?: number }
+  | { kind: 'box'; center: V3; size: V3; rotY?: number; rotX?: number; rotZ?: number; rounded?: number }
   | { kind: 'cylinder'; center: V3; radius: number; height: number; axis: 'x' | 'y' | 'z' }
   | { kind: 'rock'; center: V3; radius: number; seed: number; squash?: number }
   | { kind: 'pillar'; center: V3; radius: number; height: number; seed: number }
@@ -39,6 +56,19 @@ export interface Blueprint {
   movers?: Mover[];
   /** when present, every spawn point is inside a safe zone */
   safeZones?: SafeZone[];
+  /** hand-placed spawn points (facing the room center), instead of three per room */
+  spawns?: { room: string; pos: V3 }[];
+  /** world orange target ×scale up to cap; room spawn regions weigh ×roomWeight */
+  oranges?: { scale: number; cap: number; roomWeight: number };
+}
+
+const _qa = q4(), _qb = q4();
+/** Orientation of a box prop: Z tilt, then X tilt, then Y turn. */
+export function boxRotation(b: { rotX?: number; rotY?: number; rotZ?: number }, out: Q4): Q4 {
+  qfromAxisAngle(out, v3(0, 1, 0), b.rotY ?? 0);
+  if (b.rotX) qmul(out, out, qfromAxisAngle(_qa, v3(1, 0, 0), b.rotX));
+  if (b.rotZ) qmul(out, out, qfromAxisAngle(_qb, v3(0, 0, 1), b.rotZ));
+  return out;
 }
 
 const W = 4;

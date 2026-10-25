@@ -68,6 +68,7 @@ function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string):
 
 const AMBIENCE_OF: Record<Theme, string> = {
   refinery: 'hub', industrial: 'foundry', hangar: 'dock', reactor: 'reactor', rock: 'gallery', machinery: 'crusher', tunnel: 'tunnel', sewer: 'tunnel',
+  office: 'hub', garage: 'gallery', roof: 'wind', shaft: 'tunnel',
 };
 const tunnelRoomsOf = (a: ArenaData) => new Map<string, [string, string]>(a.blueprint.tunnels.map((t) => [t.id, [t.a, t.b]]));
 
@@ -94,6 +95,9 @@ async function boot(): Promise<void> {
   let arenaView: ArenaView = buildArena(arena);
   renderer.scene.add(arenaView.group);
   const lights = new LightRig(renderer.scene, arenaView, arena.adjacency, tunnelRoomsOf(arena));
+  // every zone's shaders at once, in parallel, instead of a stall the first time each floor comes into view
+  const precompileArena = () => { void renderer.renderer.compileAsync(arenaView.group, renderer.camera, renderer.scene); };
+  precompileArena();
   const effects = new Effects(renderer.scene);
   const shipR = new ShipRenderer(renderer.scene, effects);
   const projR = new ProjectileRenderer(renderer.scene);
@@ -122,6 +126,7 @@ async function boot(): Promise<void> {
     arenaView = buildArena(a);
     renderer.scene.add(arenaView.group);
     lights.setArena(arenaView, a.adjacency, tunnelRoomsOf(a));
+    precompileArena();
     lastPlace = null;
     losCache.clear();
     console.info(`${a.blueprint.name} ready in ${(performance.now() - t1).toFixed(0)} ms`);

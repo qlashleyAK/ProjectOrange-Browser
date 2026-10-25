@@ -1,6 +1,6 @@
 import { DT } from '../constants.js';
 import { q4, qfromAxisAngle, qrot, segmentPointDistSq, v3, type Q4, type V3 } from '../math.js';
-import type { Mover, Prop } from './blueprint.js';
+import { boxRotation, type Mover, type Prop } from './blueprint.js';
 
 const AXIS: Record<'x' | 'y' | 'z', V3> = { x: v3(1, 0, 0), y: v3(0, 1, 0), z: v3(0, 0, 1) };
 
@@ -22,30 +22,32 @@ export function moverPose(m: Mover, tick: number, pos: V3, rot: Q4): void {
 export interface Sphere { c: V3; r: number }
 
 /** Conservative bounding spheres of a box, split along its long dimensions so slabs and arms stay tight. */
-function boxSpheres(center: V3, size: V3, rotY: number): Sphere[] {
+function boxSpheres(center: V3, size: V3, rot: Q4 = IDENT): Sphere[] {
   const dims = [size.x, size.y, size.z];
   const cell = Math.max(Math.min(...dims), Math.max(...dims) / 6);
   const n = dims.map((d) => Math.max(1, Math.ceil(d / cell - 1e-6)));
   const sub = dims.map((d, i) => d / n[i]!);
   const r = Math.hypot(sub[0]! / 2, sub[1]! / 2, sub[2]! / 2);
-  const c = Math.cos(rotY), s = Math.sin(rotY);
   const out: Sphere[] = [];
+  const local = v3();
   for (let i = 0; i < n[0]!; i++) for (let j = 0; j < n[1]!; j++) for (let k = 0; k < n[2]!; k++) {
-    const x = -size.x / 2 + (i + 0.5) * sub[0]!, y = -size.y / 2 + (j + 0.5) * sub[1]!, z = -size.z / 2 + (k + 0.5) * sub[2]!;
-    out.push({ c: v3(center.x + x * c + z * s, center.y + y, center.z - x * s + z * c), r });
+    local.x = -size.x / 2 + (i + 0.5) * sub[0]!; local.y = -size.y / 2 + (j + 0.5) * sub[1]!; local.z = -size.z / 2 + (k + 0.5) * sub[2]!;
+    const w = qrot(v3(), rot, local);
+    out.push({ c: v3(center.x + w.x, center.y + w.y, center.z + w.z), r });
   }
   return out;
 }
+const IDENT = q4();
 
 /** World-space bounding spheres of a prop at its blueprint pose. */
 export function partSpheres(p: Prop): Sphere[] {
   switch (p.kind) {
-    case 'box': return boxSpheres(p.center, p.size, p.rotY ?? 0);
+    case 'box': return boxSpheres(p.center, p.size, boxRotation(p, q4()));
     case 'cylinder': {
       const d = p.radius * 2;
-      return boxSpheres(p.center, p.axis === 'x' ? v3(p.height, d, d) : p.axis === 'y' ? v3(d, p.height, d) : v3(d, d, p.height), 0);
+      return boxSpheres(p.center, p.axis === 'x' ? v3(p.height, d, d) : p.axis === 'y' ? v3(d, p.height, d) : v3(d, d, p.height));
     }
-    case 'pillar': return boxSpheres(p.center, v3(p.radius * 2, p.height, p.radius * 2), 0);
+    case 'pillar': return boxSpheres(p.center, v3(p.radius * 2, p.height, p.radius * 2));
     case 'rock': return [{ c: p.center, r: p.radius * 1.15 * Math.max(1, p.squash ?? 1) }];
     case 'crystal': {
       const h = p.length / 2;

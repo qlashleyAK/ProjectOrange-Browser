@@ -51,7 +51,7 @@ for (let i = 0; i < ticks; i++) {
 }
 const ms = (performance.now() - t0) / ticks;
 if (maxProj > PROJECTILE_CAP_PER_SHIP * sim.shipList.length) problems.push(`projectiles peaked at ${maxProj}`);
-if (maxPickups > WORLD_ORANGE_CAP + DROP_CAP) problems.push(`pickups peaked at ${maxPickups}`);
+if (maxPickups > (arena.blueprint.oranges?.cap ?? WORLD_ORANGE_CAP) + DROP_CAP) problems.push(`pickups peaked at ${maxPickups}`);
 if (deaths === 0) problems.push('no deaths: bots are not fighting');
 if (pickups === 0) problems.push('no pickups: bots are not collecting');
 const safeShare = aliveTicks ? safeTicks / aliveTicks : 0;

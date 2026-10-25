@@ -1,6 +1,6 @@
 import { settings } from '../settings';
 import {
-  REVERB_OF, renderAmbience, renderMatchMusic, renderMenuMusic, renderReverb, renderSounds,
+  AMBIENCES, REVERB_OF, REVERBS, renderAmbience, renderMatchMusic, renderMenuMusic, renderReverb, renderSounds,
   type AmbienceId, type ReverbId, type SoundName,
 } from './sounds';
 import { SR } from './synth';
@@ -81,8 +81,8 @@ export class AudioEngine {
     // heavier assets are rendered in idle slices so the first click doesn't hitch
     const jobs: (() => void)[] = [
       () => { this.musicBuffers.menu = this.stereo(renderMenuMusic()); if (this.wantMusic === 'menu') this.startMusic('menu'); },
-      ...(['hall', 'metal', 'hangar', 'reactor', 'cave', 'machinery', 'tight'] as ReverbId[]).map((id) => () => { this.reverbBuffers.set(id, this.stereo(renderReverb(id))); }),
-      ...(['hub', 'foundry', 'dock', 'reactor', 'gallery', 'crusher', 'tunnel'] as AmbienceId[]).map((id) => () => {
+      ...REVERBS.map((id) => () => { this.reverbBuffers.set(id, this.stereo(renderReverb(id))); }),
+      ...AMBIENCES.map((id) => () => {
         const d = renderAmbience(id);
         const b = ctx.createBuffer(1, d.length, SR); b.copyToChannel(d as Float32Array<ArrayBuffer>, 0); this.ambBuffers.set(id, b);
       }),
@@ -198,7 +198,7 @@ export class AudioEngine {
   setPlace(place: string | null, isTunnel: boolean): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const amb: AmbienceId = isTunnel || !place ? 'tunnel' : (['hub', 'foundry', 'dock', 'reactor', 'gallery', 'crusher'].includes(place) ? place as AmbienceId : 'tunnel');
+    const amb: AmbienceId = isTunnel || !place ? 'tunnel' : ((AMBIENCES as string[]).includes(place) ? place as AmbienceId : 'tunnel');
     const rev = REVERB_OF[amb];
     if (rev !== this.currentReverb) {
       const b = this.reverbBuffers.get(rev);

@@ -54,7 +54,7 @@ export class LightRig {
     specs.sort((a, b) => (rooms.indexOf(a.room) - rooms.indexOf(b.room)) || a.pos.distanceTo(camPos) - b.pos.distanceTo(camPos));
     for (let i = 0; i < STATIC_LIGHTS; i++) {
       const l = this.statics[i]!, s = specs[i];
-      if (s) { l.position.copy(s.pos); l.color.copy(s.color); l.intensity = s.intensity; l.distance = s.distance; }
+      if (s) { l.position.copy(s.pos); l.color.copy(s.color); l.intensity = s.intensity; l.distance = s.distance; l.decay = s.decay; }
       else l.intensity = 0;
     }
   }
