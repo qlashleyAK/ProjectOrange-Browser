@@ -81,13 +81,53 @@ export function spikePoints(length: number, radius: number, seed: number): numbe
 
 export interface Capsule { a: V3; b: V3; r: number }
 
-/** One capsule per span of a limb, at the larger end's radius. */
+/**
+ * Capsules along a limb. Neighboring spans merge while they stay short and nearly straight, so a
+ * gnarled trunk is a handful of colliders instead of one per visual vertex. Tight curls (the Coil)
+ * keep a finer chain because a fat chord would plug the gap you fly through.
+ */
 export function limbCapsules(points: V3[], radii: number[]): Capsule[] {
   const out: Capsule[] = [];
-  for (let i = 0; i + 1 < points.length; i++) {
-    const a = points[i]!, b = points[i + 1]!;
-    if (Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) < 1e-3) continue;
-    out.push({ a, b, r: Math.max(radii[i]!, radii[i + 1]!) });
+  const n = points.length;
+  if (n < 2) return out;
+  const MIN = 20, MAX_BOW = 2.0, MIN_DIR = 0.93;
+  const fit = (i0: number, i1: number) => {
+    const a = points[i0]!, b = points[i1]!;
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const lenSq = dx * dx + dy * dy + dz * dz;
+    if (lenSq < 1e-6) return { len: 0, bow: 0, r: 0 };
+    let r = 0, bow = 0;
+    const inv = 1 / lenSq;
+    for (let k = i0; k <= i1; k++) {
+      r = Math.max(r, radii[k]!);
+      const px = points[k]!.x - a.x, py = points[k]!.y - a.y, pz = points[k]!.z - a.z;
+      const t = Math.max(0, Math.min(1, (px * dx + py * dy + pz * dz) * inv));
+      bow = Math.max(bow, Math.hypot(px - dx * t, py - dy * t, pz - dz * t));
+    }
+    return { len: Math.sqrt(lenSq), bow, r };
+  };
+  const dir = (i: number, j: number, out: V3) => {
+    const a = points[i]!, b = points[j]!;
+    out.x = b.x - a.x; out.y = b.y - a.y; out.z = b.z - a.z;
+    const l = Math.hypot(out.x, out.y, out.z) || 1;
+    out.x /= l; out.y /= l; out.z /= l;
+    return out;
+  };
+  const d0 = v3(), d1 = v3();
+  let i0 = 0;
+  while (i0 < n - 1) {
+    let i1 = i0 + 1;
+    while (i1 < n - 1) {
+      dir(i0, i1, d0); dir(i1, i1 + 1, d1);
+      if (d0.x * d1.x + d0.y * d1.y + d0.z * d1.z < MIN_DIR) break;
+      const next = fit(i0, i1 + 1);
+      if (next.len < 1e-3 || next.len >= MIN || next.bow >= MAX_BOW) break;
+      i1++;
+    }
+    const a = points[i0]!, b = points[i1]!;
+    const { len, r } = fit(i0, i1);
+    if (len >= 1e-3) out.push({ a, b, r });
+    i0 = i1;
   }
   return out;
 }

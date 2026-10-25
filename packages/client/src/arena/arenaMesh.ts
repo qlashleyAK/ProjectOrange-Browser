@@ -161,7 +161,7 @@ function grainAxis(p: Prop): 'x' | 'y' | 'z' {
 
 /** Tapering tube through world-space points. Frames ride along by parallel transport so the bark doesn't twist. */
 function limbGeometry(p: Extract<Prop, { kind: 'limb' }>): THREE.BufferGeometry {
-  const n = p.points.length, segs = 8;
+  const n = p.points.length, segs = 6;
   const pts = p.points.map((q) => new THREE.Vector3(q.x, q.y, q.z));
   const T = pts.map((q, i) => {
     const t = i === 0 ? pts[1]!.clone().sub(q) : i === n - 1 ? q.clone().sub(pts[n - 2]!) : pts[i + 1]!.clone().sub(pts[i - 1]!);
@@ -713,19 +713,36 @@ export function buildArena(arena: ArenaData): ArenaView {
     }
   }
 
-  // merge per zone per material
+  // merge per zone per material. A huge room (Gloamwood) splits props into XZ cells so
+  // frustum culling can drop trees behind the camera instead of drawing the whole forest every frame.
+  const CHUNK = 120;
+  const chunkOf = (g: THREE.BufferGeometry) => {
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const c = g.boundingSphere!.center;
+    return `${Math.floor(c.x / CHUNK)},${Math.floor(c.z / CHUNK)}`;
+  };
   for (const [zone, byMat] of pending) {
     const zg = new THREE.Group();
     zg.name = zone;
     for (const [mat, geoms] of byMat) {
-      const merged = mergeGeometries(geoms.map(clean), false);
-      for (const g of geoms) g.dispose();
-      if (!merged) continue;
-      merged.computeBoundingSphere();
-      const mesh = new THREE.Mesh(merged, mat);
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      zg.add(mesh);
+      const buckets = new Map<string, THREE.BufferGeometry[]>();
+      const chunk = geoms.length >= 20;
+      for (const g of geoms) {
+        const k = chunk ? chunkOf(g) : '_';
+        let arr = buckets.get(k);
+        if (!arr) { arr = []; buckets.set(k, arr); }
+        arr.push(g);
+      }
+      for (const gs of buckets.values()) {
+        const merged = mergeGeometries(gs.map(clean), false);
+        for (const g of gs) g.dispose();
+        if (!merged) continue;
+        merged.computeBoundingSphere();
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.matrixAutoUpdate = false;
+        mesh.updateMatrix();
+        zg.add(mesh);
+      }
     }
     zones.set(zone, zg);
     group.add(zg);

@@ -22,6 +22,26 @@ describe('gloamwood', () => {
     w.free();
   });
 
+  it('keeps the Coil corkscrew open enough to fly through', () => {
+    const cx = Math.cos(54 * Math.PI / 180) * 170, cz = Math.sin(54 * Math.PI / 180) * 170;
+    const w = world();
+    let free = 0;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      if (sphereFree(w, v3(cx + Math.cos(a) * 9, FOREST_FLOOR + 50, cz + Math.sin(a) * 9), 5)) free++;
+    }
+    expect(free).toBeGreaterThanOrEqual(6);
+    w.free();
+  });
+
+  it('does not bury the physics world in per-twig capsules', () => {
+    const w = world();
+    let n = 0;
+    w.colliders.forEach(() => { n++; });
+    expect(n).toBeLessThan(2800);
+    w.free();
+  });
+
   it('is a forest: dozens of big trees, every one rooted and branching', () => {
     const limbs = arena.blueprint.props.filter((p) => p.kind === 'limb');
     const trunks = limbs.filter((p) => p.kind === 'limb' && p.role === 'trunk' && p.points[p.points.length - 1]!.y - FOREST_FLOOR > 80);

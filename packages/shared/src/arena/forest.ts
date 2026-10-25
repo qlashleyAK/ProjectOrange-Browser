@@ -136,7 +136,8 @@ function buildProps(rng: Rng): Prop[] {
       if (!open(q, r)) break;
       pts.push(q); radii.push(r);
     }
-    if (pts.length >= 3) limb(pts, radii, role);
+    // twigs and whip-thin boughs are visual only: thousands of tiny capsules hitch CCD when you fly the canopy
+    if (pts.length >= 3) limb(pts, radii, role, role === 'root' || r0 >= 2.4);
     return pts;
   };
 
