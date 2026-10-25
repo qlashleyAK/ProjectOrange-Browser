@@ -464,7 +464,8 @@ Arc Slug is a single heavy slug: 40 damage plus 3 m splash, 2.2 shots/s,
 **Limited homing:** if an enemy (with line of sight) is within an 8° cone
 of the aimed shot and within 260 m, the slug bends up to 6° onto them at
 the moment of firing — never mid-flight — forgiving imperfect lead
-without turning it into a dumb-fire missile.
+without turning it into a dumb-fire missile. Bot slugs only snap onto other
+bots (see §11, *Stormtrooper aim*).
 
 **Scythe**
 
@@ -894,9 +895,8 @@ Bots make the game alive with zero players online.
   - **Hunt:** pick a target by distance, low health, and **high power**
     (bounty). Navigate toward it.
   - **Engage:** hold a class-preferred range (Dart 60–200 m, Mule 15–80 m,
-    Scythe 150–400 m, Brute 80–300 m). Aim at the lead point
-    `targetPos + targetVel · (distance / projectileSpeed)`. Fire when aim
-    error is under a skill cone. Strafe perpendicular to the enemy's aim.
+    Scythe 150–400 m, Brute 80–300 m). Shoot like a stormtrooper (see
+    *Stormtrooper aim* below). Strafe perpendicular to the enemy's aim.
     Dodge when a projectile is about to hit.
   - **Collect:** chase oranges when no threat is near or an orange is much
     closer than any enemy. Always chase death drops after a kill.
@@ -913,11 +913,48 @@ Bots make the game alive with zero players online.
   blueprint, with nodes at room centers, room quadrants, doorways, and
   tunnel elbows. A* over the graph. Local avoidance uses 5 Rapier ray-cast
   "feelers" ahead.
+- **Stormtrooper aim [DECISION]:** bots put a lot of fire in the air and
+  mostly miss. Getting shredded by a bot is not fun, while bolts snapping
+  past your canopy is.
+  - **Aim point:** the bot never aims at the target itself. It aims at a
+    point in a disc across the line of sight, centered on the lead point.
+    The disc's radius is the target's hull radius plus a scatter. A new
+    point is rolled every 0.4–0.9 s, and the aim slides there (rate 5/s)
+    rather than jumping, so a burst stitches across and past the target.
+  - **Focus:** the scatter shrinks from `scatter` toward `minScatter` over
+    `focusTime` seconds of steady tracking. Several things shake focus: the
+    target dodge-rolling or boosting (−1.5/s), the bot taking a hit (−0.2),
+    switching targets (back to 0), and not engaging (decays at 1/3 per s).
+    Flying straight and slow is how you get tagged.
+  - **Lead:** each aim point uses a random fraction of the true lead
+    (`targetVel · time of flight`), so most shots trail a moving target.
+  - **Trigger:** fire whenever the nose is within 6° of the aim point (or
+    within the target's angular size plus 3 m, whichever is wider).
+  - **Missiles:** at least `missileGap` seconds between launches. On a human,
+    the bot waits out the lock only `lockPatience` of the time. Otherwise it
+    fires partway through the lock, and the missile flies straight.
+  - **Bot vs bot:** scatter and lead error are ×0.25, the lock is always
+    awaited, and the Arc Slug's snap still works. This keeps the kill feed
+    and orange drops moving between your fights. Bot shots never snap onto
+    humans.
+  - Measured with 6 Normal bots and a bot-flown stand-in "player" on
+    Hollowdeep (6 seeds × 4 min):
+    - bot shots aimed at the player that hit: 10.6% before, 3.4% after;
+    - damage taken by the player: 195/min before, about 100/min after;
+    - player deaths: 0.67/min before, 0.04/min after;
+    - all deaths in the match: 5.0/min before, 3.9/min after.
 - **Skill levels (Easy / Normal / Hard):**
-  - reaction delay 450 / 260 / 130 ms;
-  - aim noise 4° / 2° / 0.8°;
-  - fraction of max turn rate used 60% / 80% / 95%;
-  - dodge chance 10% / 35% / 70%.
+
+  | | Easy | Normal | Hard |
+  |---|---|---|---|
+  | reaction delay | 700 ms | 450 ms | 250 ms |
+  | scatter → minScatter (m beyond hull) | 24 → 13 | 13 → 6 | 9 → 3 |
+  | focus time | 10 s | 7 s | 4 s |
+  | lead fraction | 0.1–1.1 | 0.3–1.15 | 0.55–1.1 |
+  | missile gap | 22 s | 15 s | 9 s |
+  | lock patience (vs humans) | 25% | 40% | 65% |
+  | fraction of max turn rate used | 60% | 80% | 95% |
+  | dodge chance | 10% | 35% | 70% |
 - **Names and roster:** pick from a list and tag them `[BOT]` on the
   scoreboard. Bots pick a class to keep the room's class mix varied.
 

@@ -128,12 +128,12 @@ describe('safe zones', () => {
     let seen = 0;
     for (let i = 0; i < 60 / DT; i++) {
       sim.step();
-      if (i % 60 !== 0) continue;
-      for (const p of sim.pickups) {
-        if (p.drop) continue;
+      // once spawned, the magnet may drag an orange anywhere
+      for (const e of sim.drainEvents()) {
+        if (e.t !== 'pickupSpawn' || e.drop) continue;
         seen++;
-        expect(safeZoneAt(arena, p.pos)).toBeNull();
-        expect(moverClearance(arena.sweeps, p.pos)).toBeGreaterThanOrEqual(4);
+        expect(safeZoneAt(arena, e.pos)).toBeNull();
+        expect(moverClearance(arena.sweeps, e.pos)).toBeGreaterThanOrEqual(4);
       }
     }
     expect(seen).toBeGreaterThan(0);

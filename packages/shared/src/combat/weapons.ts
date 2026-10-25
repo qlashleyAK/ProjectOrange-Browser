@@ -141,7 +141,8 @@ export function firePrimary(sim: GameSim, s: Ship): boolean {
   const shotId = shotIdFor(s.id, s.input.seq, 0);
   const shots = volleyShots(s.def, w, count, s.pos, s.rot, s.muzzleIndex, shotId);
   if (w.seekConeDeg) {
-    const candidates = sim.shipList.filter((o) => o.alive && o.id !== s.id && sim.canSee(s, o)).map((o) => o.pos);
+    // bots miss humans on purpose; the snap would turn those near misses into hits
+    const candidates = sim.shipList.filter((o) => o.alive && o.id !== s.id && (!s.isBot || o.isBot) && sim.canSee(s, o)).map((o) => o.pos);
     applyPrimarySeek(sim.world, w, shots, candidates);
   }
   if (w.muzzle === 'alternate') s.muzzleIndex++;

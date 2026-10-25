@@ -9,11 +9,26 @@ import { activePrimary } from '../combat/weapons.js';
 import { botCanSee } from './perception.js';
 
 export type BotSkill = 'easy' | 'normal' | 'hard';
-export const SKILLS: Record<BotSkill, { reaction: number; aimNoiseDeg: number; turn: number; dodge: number }> = {
-  easy: { reaction: 0.45, aimNoiseDeg: 4, turn: 0.6, dodge: 0.1 },
-  normal: { reaction: 0.26, aimNoiseDeg: 2, turn: 0.8, dodge: 0.35 },
-  hard: { reaction: 0.13, aimNoiseDeg: 0.8, turn: 0.95, dodge: 0.7 },
+export interface SkillDef {
+  reaction: number;
+  /** meters beyond the target's hull the aim point wanders at first sight, and after `focusTime` s of steady tracking */
+  scatter: number; minScatter: number; focusTime: number;
+  /** fraction of the true lead used, re-rolled with each aim point: most bots trail a moving target */
+  lead: [number, number];
+  /** seconds between missile launches */
+  missileGap: number;
+  /** chance of waiting out the lock on a human; otherwise the bot fires early and the missile flies straight */
+  lockPatience: number;
+  turn: number; dodge: number;
+}
+/** Bots shoot like stormtroopers: lots of fire, mostly near misses, and the only way to get tagged is to fly straight and slow. */
+export const SKILLS: Record<BotSkill, SkillDef> = {
+  easy: { reaction: 0.7, scatter: 24, minScatter: 13, focusTime: 10, lead: [0.1, 1.1], missileGap: 22, lockPatience: 0.25, turn: 0.6, dodge: 0.1 },
+  normal: { reaction: 0.45, scatter: 13, minScatter: 6, focusTime: 7, lead: [0.3, 1.15], missileGap: 15, lockPatience: 0.4, turn: 0.8, dodge: 0.35 },
+  hard: { reaction: 0.25, scatter: 9, minScatter: 3, focusTime: 4, lead: [0.55, 1.1], missileGap: 9, lockPatience: 0.65, turn: 0.95, dodge: 0.7 },
 };
+/** Bots fighting each other scatter and mis-lead this much less, so the kill feed and orange drops keep moving between your fights. */
+const VS_BOT_SLOPPINESS = 0.25;
 
 export const BOT_NAMES = [
   'Vex', 'Kestrel', 'Nyx', 'Talon', 'Rook', 'Ember', 'Quill', 'Moth', 'Sable', 'Jinx', 'Halcyon', 'Pike',
@@ -32,7 +47,14 @@ export class BotBrain {
   private repathTick = 0;
   private seenSince = new Map<number, number>();
   private aimNoise = v3();
+  private aimGoal = v3();
+  private leadK = 1;
   private noiseTick = 0;
+  private focus = 0;
+  private focusId = -1;
+  private nextMissileTick = 0;
+  private holdingSecondary = false;
+  private snapTicks = Infinity;
   private strafe = v3(1, 0, 0);
   private strafeTick = 0;
   private secondaryHoldTicks = 0;
@@ -105,8 +127,12 @@ export class BotBrain {
 
     // track damage for Brute bulwark habit
     const vit = me.hull + me.shield;
-    if (vit < this.lastVitals) this.damageLog.push({ tick: sim.tick, hull: this.lastVitals - vit });
+    if (vit < this.lastVitals) {
+      this.damageLog.push({ tick: sim.tick, hull: this.lastVitals - vit });
+      this.focus = Math.max(0, this.focus - 0.2);
+    }
     this.lastVitals = vit;
+    if (this.goal !== 'engage') this.focus = Math.max(0, this.focus - DT / 3);
     this.damageLog = this.damageLog.filter((d) => sim.tick - d.tick < 60);
     const recentDamage = this.damageLog.reduce((s, d) => s + d.hull, 0);
 
@@ -137,15 +163,33 @@ export class BotBrain {
         const w = activePrimary(me.def, me.tier);
         const dist = vdist(me.pos, target.pos);
         const tof = dist / w.speed;
-        const lead = v3(target.pos.x + target.vel.x * tof - me.vel.x * tof * 0.3, target.pos.y + target.vel.y * tof - me.vel.y * tof * 0.3, target.pos.z + target.vel.z * tof - me.vel.z * tof * 0.3);
+        const toT = vnorm(v3(), v3(target.pos.x - me.pos.x, target.pos.y - me.pos.y, target.pos.z - me.pos.z));
+        if (target.id !== this.focusId) { this.focusId = target.id; this.focus = 0; }
+        this.focus = Math.min(1, this.focus + DT / sk.focusTime);
+        if (target.flight.dodgeRollTime > 0 || target.flight.boosting) this.focus = Math.max(0, this.focus - DT * 1.5);
         if (sim.tick >= this.noiseTick) {
-          const n = sk.aimNoiseDeg * DEG * dist;
-          this.aimNoise = v3(this.rng.range(-n, n), this.rng.range(-n, n), this.rng.range(-n, n));
-          this.noiseTick = sim.tick + 18;
+          // a fresh aim point in the disc around the target, across the line of sight
+          const sloppy = target.isBot ? VS_BOT_SLOPPINESS : 1;
+          const spread = (target.def.boundingRadius + sk.scatter + (sk.minScatter - sk.scatter) * this.focus) * sloppy;
+          const u = vnorm(v3(), Math.abs(toT.y) < 0.9 ? v3(-toT.z, 0, toT.x) : v3(1, 0, 0));
+          const v = v3(toT.y * u.z - toT.z * u.y, toT.z * u.x - toT.x * u.z, toT.x * u.y - toT.y * u.x);
+          const a = this.rng.range(0, Math.PI * 2), r = spread * Math.sqrt(this.rng.next());
+          const ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+          this.aimGoal = v3(u.x * ca + v.x * sa, u.y * ca + v.y * sa, u.z * ca + v.z * sa);
+          this.leadK = 1 + (this.rng.range(sk.lead[0], sk.lead[1]) - 1) * sloppy;
+          this.noiseTick = sim.tick + this.rng.int(24, 54);
         }
+        // the aim point slides rather than jumps, so a burst stitches across and past the target
+        const slide = 1 - Math.exp(-DT * 5);
+        this.aimNoise = v3(
+          this.aimNoise.x + (this.aimGoal.x - this.aimNoise.x) * slide,
+          this.aimNoise.y + (this.aimGoal.y - this.aimNoise.y) * slide,
+          this.aimNoise.z + (this.aimGoal.z - this.aimNoise.z) * slide,
+        );
+        const lk = tof * this.leadK;
+        const lead = v3(target.pos.x + target.vel.x * lk - me.vel.x * tof * 0.3, target.pos.y + target.vel.y * lk - me.vel.y * tof * 0.3, target.pos.z + target.vel.z * lk - me.vel.z * tof * 0.3);
         face = vnorm(v3(), v3(lead.x + this.aimNoise.x - me.pos.x, lead.y + this.aimNoise.y - me.pos.y, lead.z + this.aimNoise.z - me.pos.z));
         const [lo, hi] = me.def.preferredRange;
-        const toT = vnorm(v3(), v3(target.pos.x - me.pos.x, target.pos.y - me.pos.y, target.pos.z - me.pos.z));
         if (sim.tick >= this.strafeTick) {
           const side = vnorm(v3(), v3(this.rng.range(-1, 1), this.rng.range(-0.6, 0.6), this.rng.range(-1, 1)));
           const d = vdot(side, toT);
@@ -156,12 +200,18 @@ export class BotBrain {
         move = vnorm(v3(), v3(toT.x * radial + this.strafe.x * 0.8, toT.y * radial + this.strafe.y * 0.8, toT.z * radial + this.strafe.z * 0.8));
         boost = dist > hi * 1.3;
         const reacted = sim.tick - (this.seenSince.get(target.id) ?? sim.tick) >= sk.reaction / DT;
-        const err = Math.acos(clamp(vdot(fwd, vnorm(v3(), v3(lead.x - me.pos.x, lead.y - me.pos.y, lead.z - me.pos.z))), -1, 1));
-        const cone = Math.max((sk.aimNoiseDeg * 1.5 + 2) * DEG, Math.atan2(target.def.boundingRadius + 3, dist));
-        if (reacted && err < cone && dist < w.speed * w.life) out.flags |= InputFlag.Primary;
+        // fire wherever it means to aim (mostly not at you); the seeker only cares where the target really is
+        const aimErr = Math.acos(clamp(vdot(fwd, face), -1, 1));
+        const seekErr = Math.acos(clamp(vdot(fwd, toT), -1, 1));
+        const cone = Math.max(6 * DEG, Math.atan2(target.def.boundingRadius + 3, dist));
+        if (reacted && aimErr < cone && dist < w.speed * w.life) out.flags |= InputFlag.Primary;
         // secondary: hold to lock, release when locked or after a while
-        if (me.ammo > 0 && dist < me.def.secondary.lockRange && err < me.def.secondary.lockConeDeg * DEG) {
-          if (me.lock.locked && this.secondaryHoldTicks > 0) this.secondaryHoldTicks = 0;
+        if (sim.tick >= this.nextMissileTick && me.ammo > 0 && dist < me.def.secondary.lockRange && seekErr < me.def.secondary.lockConeDeg * DEG) {
+          if (this.secondaryHoldTicks === 0) {
+            const early = !target.isBot && !this.rng.chance(sk.lockPatience);
+            this.snapTicks = early ? this.rng.int(12, Math.max(13, Math.round(me.def.secondary.lockTime * 0.8 / DT))) : Infinity;
+          }
+          if ((me.lock.locked || this.secondaryHoldTicks >= this.snapTicks) && this.secondaryHoldTicks > 0) this.secondaryHoldTicks = 0;
           else { out.flags |= InputFlag.Secondary; this.secondaryHoldTicks++; }
           if (this.secondaryHoldTicks > 150) this.secondaryHoldTicks = 0;
         } else this.secondaryHoldTicks = 0;
@@ -299,5 +349,9 @@ export class BotBrain {
       out.tUp = clamp(lm.y * 1.5, -1, 1);
     }
     if (boost) out.flags |= InputFlag.Boost;
+    // letting go of secondary launches, locked or not
+    const holding = (out.flags & InputFlag.Secondary) !== 0;
+    if (this.holdingSecondary && !holding) this.nextMissileTick = sim.tick + Math.round(sk.missileGap * this.rng.range(0.7, 1.3) / DT);
+    this.holdingSecondary = holding;
   }
 }
