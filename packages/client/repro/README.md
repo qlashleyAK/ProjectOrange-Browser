@@ -64,6 +64,7 @@ expectation fails until the bug is fixed. After the fix it doubles as a regressi
 | `look` `dx` `dy` `ms?` | mouse look by pixels (needs `focus` first) |
 | `fire` `ms` `button?` | holds `left` (primary) or `right` (lock / secondary) |
 | `wait` `ms` · `screenshot` `name` · `noErrors` | pause, capture, assert a clean console |
+| `touch` `points` `ms` | fingers down together (`at`: selector or `[x, y]`, optional `dx`/`dy` slide), e.g. stick + FIRE — needs `device` |
 
 Expressions are JavaScript evaluated in the page, with these names in scope:
 - `p`: `window.orange.probe()` (see `packages/client/src/main.ts`), with fields `version`, `mode`
@@ -77,6 +78,7 @@ Top-level options:
 - `settings`: merged into the saved settings before load. Defaults are low quality, muted and no first-visit flow.
 - `query`: for example `"?room=ABCDE"`.
 - `viewport`: default `[1280, 720]`.
+- `device`: a Playwright device to emulate, such as `"Pixel 7 landscape"`. It brings touch, a mobile user agent and the device's viewport, and the game then picks touch controls on its own. See `mobile-smoke`.
 - `allowConsoleErrors`: regexes for console noise this scenario should ignore.
 
 ## Limits: headless runs are slower than real hardware

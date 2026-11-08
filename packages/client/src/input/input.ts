@@ -1,9 +1,11 @@
 import { clamp, InputFlag, type InputCmd } from '@orange/shared';
-import { settings } from '../settings';
+import { settings, touchMode } from '../settings';
 
 export type UiAction = 'camera' | 'scoreboard' | 'scoreboardUp' | 'debug' | 'menu' | 'assist' | 'fullscreen';
 
 const MOUSE_GAIN = 0.2;
+/** touch drag: pixels → rate, a bit hotter than the mouse since thumbs travel less */
+const TOUCH_GAIN = 0.35;
 const DOUBLE_TAP_MS = 250;
 const JOY_RADIUS = 160;
 
@@ -25,6 +27,10 @@ export class InputManager {
   private seq = 0;
   private padPrev: boolean[] = [];
   private listeners = new Map<UiAction, Set<() => void>>();
+  /** on-screen controls (TouchControls) write here: stick x = strafe, y = forward, up = climb; held = InputFlag bits */
+  touch = { x: 0, y: 0, up: 0, held: 0 };
+  private tdx = 0;
+  private tdy = 0;
   assist = settings.assistDefault;
   enabled = false;
   lastDevice: 'kbm' | 'pad' = 'kbm';
@@ -49,11 +55,26 @@ export class InputManager {
 
   get pointerLocked(): boolean { return document.pointerLockElement === this.canvas; }
   requestLock(): void {
-    if (this.pointerLocked) return;
+    if (this.pointerLocked || touchMode()) return; // touch looks by dragging; no pointer lock on phones
     const p = this.canvas.requestPointerLock?.() as unknown;
     if (p instanceof Promise) p.catch(() => { /* user gesture required */ });
   }
   releaseLock(): void { if (this.pointerLocked) document.exitPointerLock(); }
+
+  /** touch look: drag deltas in pixels, spread over the frame's ticks like mouse motion */
+  addTouchLook(dx: number, dy: number): void { if (this.enabled) { this.tdx += dx; this.tdy += dy; } }
+
+  /** one-shot touch buttons (ability, repel, dodge) */
+  latchTouch(flag: number): void { if (this.enabled) this.latched |= flag; }
+
+  /** dodge toward the stick (right if centred) */
+  touchDodge(): void {
+    const { x, y, up } = this.touch;
+    let f: number = InputFlag.DodgeR;
+    if (Math.abs(x) >= 0.3 && Math.abs(x) >= Math.abs(y)) f = x < 0 ? InputFlag.DodgeL : InputFlag.DodgeR;
+    else if (up !== 0) f = up > 0 ? InputFlag.DodgeU : InputFlag.DodgeD;
+    this.latchTouch(f);
+  }
 
   /** virtual joystick offset in pixels from screen center (for drawing the ring) */
   get joystick() { return settings.mouseMode === 'joystick' ? { ...this.joy, radius: JOY_RADIUS } : null; }
@@ -167,6 +188,13 @@ export class InputManager {
         yaw += pad.yaw * sens; pitch += pad.pitch * sens; roll += pad.roll;
         flags |= pad.flags;
       }
+      // touch: stick + climb buttons + held buttons; look drags spread over the frame like mouse motion
+      const tdx = this.tdx * share, tdy = this.tdy * share;
+      this.tdx -= tdx; this.tdy -= tdy;
+      yaw += tdx * settings.touchLook * TOUCH_GAIN;
+      pitch += -tdy * settings.touchLook * TOUCH_GAIN;
+      fwd += this.touch.y; right += this.touch.x; up += this.touch.up;
+      flags |= this.touch.held;
       flags |= this.latched;
       this.latched = 0;
     }

@@ -1,7 +1,7 @@
 import { arenaInfo, ARENAS, BUILD_VERSION, CLASSES, todayChallenge, type ClassId } from '@orange/shared';
 import { copyText } from '../hud/hud';
 import type { LeaderboardWindow, PilotProfile, ServerApi } from '../net/api';
-import { resetSettings, saveSettings, settings, type Settings } from '../settings';
+import { resetSettings, saveSettings, settings, touchMode, type Settings } from '../settings';
 
 export interface MainMenuActions {
   quickPlay: () => void;
@@ -37,6 +37,12 @@ const KEYS: [string, string][] = [
   ['1–4', 'Pick ship (when dead)'], ['Esc', 'Menu / release mouse'],
 ];
 
+const TOUCH_HELP: [string, string][] = [
+  ['Left thumb', 'Move stick — appears where you touch'], ['Right side', 'Drag to look'], ['FIRE', 'Hold to shoot — drag it to aim'],
+  ['LOCK', 'Hold to lock, release to fire missiles'], ['BOOST / BRAKE', 'Hold'], ['UP / DOWN', 'Climb / dive'],
+  ['DODGE', 'Toward the stick'], ['ABILITY / REPEL', 'Tap'], ['☰ / ≡', 'Menu / scoreboard'],
+];
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', parent?: HTMLElement, html?: string): HTMLElementTagNameMap[K] {
@@ -69,7 +75,7 @@ export class Menu {
     this.root = h('div', 'overlay hidden', container);
     this.root.style.zIndex = '20';
     this.panel = h('div', 'panel interactive', this.root);
-    this.panel.style.minWidth = '420px';
+    this.panel.style.minWidth = 'min(420px, calc(100vw - 16px))';
     // keyboard-first: ↑/↓ walk the buttons and fields of the open screen, Enter/Space activate (native)
     document.addEventListener('keydown', (e) => {
       if (!this.isOpen || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
@@ -116,10 +122,12 @@ export class Menu {
     h('div', 'sub', p, 'Six-degrees-of-freedom arena combat.');
     const pres = h('div', 'presence', p, esc(this.presenceText ?? ''));
     pres.classList.toggle('hidden', !this.presenceText);
-    const commit = this.nameRow(p);
+    // name + map: stacked normally, side by side on short (phone landscape) screens
+    const fields = h('div', 'fields', p);
+    const commit = this.nameRow(fields);
 
     const map = arenaInfo(settings.arena);
-    const mapRow = h('div', 'row', p);
+    const mapRow = h('div', 'row', fields);
     h('label', '', mapRow, 'First map');
     const sel = h('select', '', mapRow) as HTMLSelectElement;
     for (const m of ARENAS) { const o = h('option', '', sel, esc(m.name)) as HTMLOptionElement; o.value = m.id; }
@@ -133,13 +141,14 @@ export class Menu {
     h('div', 'sub map-blurb', p, `${esc(map.blurb)} · maps rotate every match`);
 
     const toMain = () => this.showMain(a, roomFromUrl);
-    if (roomFromUrl) button(p, `Join room ${roomFromUrl}`, 'Private match from your invite link', () => { commit(); a.joinPrivate(roomFromUrl); }, true);
-    button(p, 'Quick Match', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
+    const list = h('div', 'main-btns', p);
+    if (roomFromUrl) button(list, `Join room ${roomFromUrl}`, 'Private match from your invite link', () => { commit(); a.joinPrivate(roomFromUrl); }, true);
+    button(list, 'Quick Match', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
     const today = todayChallenge();
-    button(p, 'Daily challenge', `${DAILY_MODES[today.mode]} — ${DAILY_BLURB[today.mode]} · same seed for everyone today`, () => { commit(); a.daily(); });
-    button(p, 'Ranked', '1v1 duels · rank ladder · season 1', () => { commit(); this.showRanked(toMain); });
-    button(p, 'Practice vs bots', `Starts on ${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
-    button(p, 'Private match', `Starts on ${map.name} · create a room or join by code`, () => { commit(); this.showPrivate(a, toMain); });
+    button(list, 'Daily challenge', `${DAILY_MODES[today.mode]} — ${DAILY_BLURB[today.mode]} · same seed for everyone today`, () => { commit(); a.daily(); });
+    button(list, 'Ranked', '1v1 duels · rank ladder · season 1', () => { commit(); this.showRanked(toMain); });
+    button(list, 'Practice vs bots', `Starts on ${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
+    button(list, 'Private match', `Starts on ${map.name} · create a room or join by code`, () => { commit(); this.showPrivate(a, toMain); });
     const more = h('div', 'btn-row', p);
     button(more, 'Leaderboards', '', () => { commit(); this.showLeaderboards(a, toMain); });
     button(more, 'Profile', '', () => { commit(); this.showProfile(a, toMain); });
@@ -265,6 +274,12 @@ export class Menu {
     const p = this.open('controls');
     this.back = back;
     h('h2', '', p, 'CONTROLS');
+    if (touchMode()) {
+      h('div', 'keys', p).innerHTML = TOUCH_HELP.map(([a, b]) => `<div><b>${esc(a)}</b>${esc(b)}</div>`).join('');
+      h('div', 'sub', p, 'Keyboard + mouse and gamepads work too — switch in Settings → Controls.').style.marginTop = '12px';
+      button(p, 'Back', '', back);
+      return;
+    }
     const k = h('div', 'keys', p);
     k.innerHTML = KEYS.map(([a, b]) => `<div><b>${esc(a)}</b>${esc(b)}</div>`).join('');
     h('div', 'sub', p, 'Gamepad: standard mapping — sticks fly, triggers fire, bumpers climb/dive, A + stick dodges.').style.marginTop = '12px';
@@ -324,6 +339,8 @@ export class Menu {
 
     switch (tab) {
       case 'controls':
+        select('Control scheme', 'controls', [['auto', 'Auto (touch on phones)'], ['touch', 'Touch screen'], ['kbm', 'Keyboard + mouse']]);
+        if (touchMode()) range('Touch look speed', 'touchLook', 0.3, 3, 0.05);
         range('Mouse sensitivity', 'sensitivity', 0.05, 5, 0.05);
         select('Mouse mode', 'mouseMode', [['direct', 'Direct (default)'], ['joystick', 'Virtual joystick (trackpads)']]);
         check('Invert pitch', 'invertPitch');

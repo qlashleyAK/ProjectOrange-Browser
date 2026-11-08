@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { chromium, devices, type Browser, type Page } from 'playwright-core';
 
 export type Step =
   /** click a visible button whose label starts with `text` (menu, pause, HUD) */
@@ -44,7 +44,12 @@ export type Step =
   /** remember the current probe as `m.<as>` for later expressions, e.g. `dist(p.pos, m.spawn.pos) > 20` */
   | { do: 'mark'; as: string }
   /** no page errors and no unexpected console errors so far */
-  | { do: 'noErrors' };
+  | { do: 'noErrors' }
+  /**
+   * fingers down together for `ms`, each sliding by (dx, dy) over the first half, then lifted — e.g. stick + FIRE.
+   * `at` is a CSS selector (element centre) or viewport [x, y]. Needs a touch `device`.
+   */
+  | { do: 'touch'; points: { at: string | [number, number]; dx?: number; dy?: number }[]; ms: number };
 
 export interface Scenario {
   name: string;
@@ -54,6 +59,8 @@ export interface Scenario {
   /** appended to the page URL, e.g. "?room=ABCDE" */
   query?: string;
   viewport?: [number, number];
+  /** Playwright device to emulate (touch, mobile UA, its viewport), e.g. "Pixel 7 landscape", "iPhone 15 landscape" */
+  device?: string;
   /** regexes for console errors that are known noise for this scenario */
   allowConsoleErrors?: string[];
   steps: Step[];
@@ -97,7 +104,7 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
-const STEP_KINDS = new Set(['click', 'waitFor', 'hold', 'press', 'look', 'fire', 'focus', 'wait', 'screenshot', 'expect', 'mark', 'noErrors']);
+const STEP_KINDS = new Set(['click', 'waitFor', 'hold', 'press', 'look', 'fire', 'focus', 'wait', 'screenshot', 'expect', 'mark', 'noErrors', 'touch']);
 
 export function validateScenario(s: unknown): Scenario {
   const sc = s as Scenario;
@@ -231,8 +238,10 @@ async function main(): Promise<number> {
         '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--autoplay-policy=no-user-gesture-required',
       ],
     });
-    const [w, h] = scenario.viewport ?? [1280, 720];
-    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    const device = scenario.device ? devices[scenario.device] : undefined;
+    if (scenario.device && !device) throw new Error(`unknown device ${JSON.stringify(scenario.device)} (see Playwright's device list)`);
+    const [w, h] = device ? [device.viewport.width, device.viewport.height] : scenario.viewport ?? [1280, 720];
+    const ctx = await browser.newContext(device ? { ...device } : { viewport: { width: w, height: h } });
     const settings = { ...DEFAULT_SETTINGS, ...(scenario.settings ?? {}) };
     await ctx.addInitScript((s) => { try { localStorage.setItem('orange.settings.v1', s); } catch { /* ignore */ } }, JSON.stringify(settings));
     const page = await ctx.newPage();
@@ -267,7 +276,7 @@ async function main(): Promise<number> {
     lines.push(
       `- **Target:** ${args.url ? origin : 'local server (built client, in-memory DB)'} — server build ${ping.version}`,
       `- **Client build:** ${String(first?.version ?? '?')} (${String(first?.buildTime ?? '?')})`,
-      `- **Browser:** headless Chromium ${browser.version()} · ${gl} · ${w}×${h}`,
+      `- **Browser:** headless Chromium ${browser.version()} · ${gl} · ${w}×${h}${scenario.device ? ` · emulating ${scenario.device}` : ''}`,
       `- **Scenario:** \`${args.scenario}\``,
       '', '| # | step | result | state after |', '|---|---|---|---|',
     );
@@ -373,6 +382,24 @@ async function main(): Promise<number> {
             marks[st.as] = p;
             const pos = p?.pos as { x: number; y: number; z: number } | null | undefined;
             res.note = `m.${st.as} saved${pos ? ` at (${pos.x}, ${pos.y}, ${pos.z})` : ''}`;
+            break;
+          }
+          case 'touch': {
+            const cdp = await page.context().newCDPSession(page);
+            const starts = await Promise.all(st.points.map(async (pt) => {
+              if (Array.isArray(pt.at)) return { x: pt.at[0], y: pt.at[1] };
+              const b = await page.locator(pt.at).first().boundingBox();
+              if (!b) throw new Error(`no element for ${pt.at}`);
+              return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+            }));
+            const at = (f: number) => st.points.map((pt, i) => ({ x: starts[i]!.x + (pt.dx ?? 0) * f, y: starts[i]!.y + (pt.dy ?? 0) * f, id: i }));
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+            const n = Math.max(1, Math.round(st.ms / 2 / 50));
+            for (let k = 1; k <= n; k++) { await page.waitForTimeout(50); await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(k / n) }); }
+            await page.waitForTimeout(st.ms / 2);
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await cdp.detach();
+            res.note = `${st.points.length} finger(s) for ${st.ms} ms`;
             break;
           }
           case 'noErrors': {

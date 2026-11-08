@@ -9,6 +9,7 @@ import { audio } from './audio/audio';
 import { Presenter } from './game/presenter';
 import { Hud } from './hud/hud';
 import { InputManager } from './input/input';
+import { TouchControls } from './input/touch';
 import { OfflineSource } from './modes/offline';
 import { OnlineSource, type NetStatus } from './modes/online';
 import { presenceTabId, serverApi } from './net/api';
@@ -21,7 +22,7 @@ import { PowerupRenderer } from './render/powerups';
 import { MissileRenderer, PickupRenderer, ProjectileRenderer } from './render/projectiles';
 import { Renderer } from './render/renderer';
 import { ShipRenderer } from './render/ships';
-import { onSettings, saveSettings, settings, type Quality } from './settings';
+import { onSettings, saveSettings, settings, touchMode, type Quality } from './settings';
 import { Menu } from './ui/menu';
 import type { ShipView, ViewSource } from './view';
 
@@ -91,6 +92,19 @@ async function boot(): Promise<void> {
   const hud = new Hud(hudEl);
   hud.setVisible(false);
   const menu = new Menu(hudEl);
+  const touch = new TouchControls(hudEl, input, { menu: () => openPause(), scoreboard: (on) => { hud.showScoreboard = on; } });
+  const applyControlScheme = () => document.body.classList.toggle('touch-ui', touchMode());
+  applyControlScheme();
+  onSettings(applyControlScheme);
+  /** phones: a match runs fullscreen and landscape where the browser allows it (needs the tap that started it) */
+  const mobileFullscreen = () => {
+    if (!touchMode() || document.fullscreenElement) return;
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    const p = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? (el.webkitRequestFullscreen?.(), undefined);
+    void Promise.resolve(p)
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> })?.lock?.('landscape'))
+      .catch(() => { /* not allowed here (iOS Safari): the rotate hint covers it */ });
+  };
   const regionPing = pingRegions();
 
   await physics;
@@ -257,6 +271,7 @@ async function boot(): Promise<void> {
 
   const startOnline = async (kind: 'quick' | 'private' | 'daily', room: string | null) => {
     audio.unlock();
+    mobileFullscreen();
     connecting = true;
     menu.showMessage('Connecting…', kind === 'private' ? `Room ${room}` : kind === 'daily' ? "Today's daily challenge" : 'Finding a match', [{ label: 'Cancel', fn: () => { endSession(); } }]);
     const region = bestRegion ?? { origin: location.origin, name: 'local', ping: 0 };
@@ -289,6 +304,7 @@ async function boot(): Promise<void> {
 
   const startPractice = (mainThread = false) => {
     audio.unlock();
+    mobileFullscreen();
     const cls: ClassId = settings.firstVisit ? 'dart' : settings.lastClass;
     const map = arenaById(settings.arena);
     let src: ViewSource;
@@ -402,6 +418,7 @@ async function boot(): Promise<void> {
     fpsAvg += (1 / Math.max(dt, 1e-3) - fpsAvg) * 0.05;
     const s = session;
 
+    touch.setVisible(!!s && !menu.isOpen && touchMode());
     if (!s) {
       // menu backdrop: a slow drift through the hub (or the first room of other maps)
       const t = nowMs / 1000 * 0.05;
@@ -452,6 +469,8 @@ async function boot(): Promise<void> {
       fov = camRig.deathCam(dt, deathPos, killer ? vC.set(killer.pos.x, killer.pos.y, killer.pos.z) : null, time - deathAt);
     }
     wasAlive = !!L?.alive;
+    touch.setFlying(!!L?.alive && src.match().phase !== 'postMatch');
+    if (touch.visible && L) touch.setReady(L.abilityCooldown <= 0 && L.abilityActive <= 0, L.tier.repel && L.repelCooldown <= 0);
     renderer.setHorizontalFov(fov);
     const camPos = renderer.camera.position;
 
@@ -570,7 +589,8 @@ async function boot(): Promise<void> {
       version: BUILD_VERSION, buildTime: __BUILD_TIME__,
       mode: session ? session.kind : 'menu', online: src?.online ?? false, connecting, paused,
       menu: menu.screen, arena: arena.blueprint.id, fps: Math.round(fpsAvg), quality: renderer.quality,
-      pointerLocked: input.pointerLocked, inputEnabled: input.enabled,
+      pointerLocked: input.pointerLocked, inputEnabled: input.enabled, touchControls: touch.visible,
+      controlScheme: touchMode() ? 'touch' : 'kbm',
       ping: net ? Math.round(net.ping) : null, corrections: net ? r1(net.corrections) : null,
       phase: m?.phase ?? null, timeLeft: m ? Math.round(m.timeLeft) : null,
       alive: L?.alive ?? null, classId: L ? L.def.id : null, hull: L ? r1(L.hull) : null, shield: L ? r1(L.shield) : null,
