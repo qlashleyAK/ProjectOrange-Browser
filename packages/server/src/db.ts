@@ -60,6 +60,14 @@ export interface LeaderboardRow {
   matches: number; damage: number; best_placement: number; last_seen: number;
 }
 
+export interface PilotProfile {
+  handle: string; firstSeen: number; lastSeen: number;
+  matches: number; wins: number; kills: number; deaths: number; assists: number; damage: number;
+  shots: number; hits: number; oranges: number; peak_power: number; best_placement: number; seconds: number;
+  /** most-flown first */
+  classes: { classId: string; matches: number; kills: number }[];
+}
+
 /** `:memory:` for tests; a file path for production (`ORANGE_DB` env). */
 export function openDb(path: string): DatabaseSync {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -118,6 +126,29 @@ export class MatchStore {
       LIMIT ?`,
     ).all(since, since, limit) as unknown[] as LeaderboardRow[];
     return rows;
+  }
+
+  /** Lifetime stats for one identity token, or null if it has never finished a match. */
+  profile(token: string): PilotProfile | null {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS matches,
+             SUM(CASE WHEN m.winner = mp.player_id THEN 1 ELSE 0 END) AS wins,
+             SUM(mp.kills) AS kills, SUM(mp.deaths) AS deaths, SUM(mp.assists) AS assists,
+             SUM(mp.damage) AS damage, SUM(mp.shots) AS shots, SUM(mp.hits) AS hits,
+             SUM(mp.oranges) AS oranges, MAX(mp.peak_power) AS peak_power, MIN(mp.placement) AS best_placement,
+             SUM(m.duration_s) AS seconds
+      FROM match_players mp JOIN matches m ON m.id = mp.match_id
+      WHERE mp.token = ? AND mp.is_bot = 0`,
+    ).get(token) as Omit<PilotProfile, 'handle' | 'firstSeen' | 'lastSeen' | 'classes'> | undefined;
+    if (!row || !row.matches) return null;
+    const who = this.db.prepare('SELECT handle, created_at, last_seen FROM players WHERE token = ?').get(token) as
+      { handle: string; created_at: number; last_seen: number } | undefined;
+    const classes = this.db.prepare(`
+      SELECT class_id AS classId, COUNT(*) AS matches, SUM(kills) AS kills
+      FROM match_players WHERE token = ? AND is_bot = 0
+      GROUP BY class_id ORDER BY matches DESC, kills DESC`,
+    ).all(token) as unknown[] as PilotProfile['classes'];
+    return { ...row, handle: who?.handle ?? '', firstSeen: who?.created_at ?? 0, lastSeen: who?.last_seen ?? 0, classes };
   }
 
   recentMatches(limit = 20): unknown[] {

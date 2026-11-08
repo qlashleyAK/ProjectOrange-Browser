@@ -59,7 +59,12 @@ export interface RoomOptions {
   log?: (msg: string) => void;
 }
 
-const REPEAT_CLEAR = InputFlag.Primary | InputFlag.Ability | InputFlag.Repel | InputFlag.DodgeL | InputFlag.DodgeR | InputFlag.DodgeU | InputFlag.DodgeD;
+/** Anonymous identity tokens are minted by rooms as base36; accept that shape back from clients and nothing else. */
+export function isIdentityToken(t: unknown): t is string {
+  return typeof t === 'string' && /^[a-z0-9]{8,32}$/.test(t);
+}
+
+const REPEAT_CLEAR =InputFlag.Primary | InputFlag.Ability | InputFlag.Repel | InputFlag.DodgeL | InputFlag.DodgeR | InputFlag.DodgeU | InputFlag.DodgeD;
 /** events never sent over JSON (they travel in the binary snapshot) */
 const BINARY_EVENTS = new Set(['projSpawn', 'projEnd', 'shot']);
 
@@ -107,6 +112,8 @@ export class GameRoom {
 
   // ------------------------------------------------------------------ occupancy
   get humans(): number { return this.sim.shipList.filter((s) => !s.isBot).length; }
+  /** humans with a live connection (excludes slots held for a reconnect) — the presence counter's "in matches" */
+  get connectedHumans(): number { return this.sim.shipList.filter((s) => !s.isBot && s.connected).length; }
   get participants(): number { return this.sim.shipList.filter((s) => !s.removeAtDeath).length; }
   get hasFreeSlot(): boolean { return this.humans < MAX_PARTICIPANTS; }
 
@@ -182,7 +189,11 @@ export class GameRoom {
         } else {
           if (!this.hasFreeSlot) { this.sendJson(c, { t: 'full' }); c.link.close(); return; }
           this.makeRoomForHuman();
-          c.token = `${hash32(this.sim.tick, this.now() | 0, Math.random() * 1e9).toString(36)}${hash32(Math.random() * 1e9).toString(36)}`;
+          // the token is the pilot's identity across rooms and visits (stats, profile): keep the one the client
+          // brings, unless it's malformed or already flying in this room (a second tab gets its own)
+          c.token = isIdentityToken(m.token) && !prev
+            ? m.token
+            : `${hash32(this.sim.tick, this.now() | 0, Math.random() * 1e9).toString(36).padStart(7, '0')}${hash32(Math.random() * 1e9).toString(36).padStart(7, '0')}`;
           c.playerId = `p:${c.token.slice(0, 8)}`;
           const ship = this.sim.addPlayer(c.playerId, name, cls);
           c.shipId = ship.id;

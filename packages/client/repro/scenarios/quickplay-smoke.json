@@ -1,10 +1,10 @@
 {
-  "name": "Quick Play online: join, spawn, leave",
+  "name": "Quick Match online: join, spawn, leave",
   "description": "Online path against the harness's local game server: /quickplay, WebSocket welcome, bot backfill, remembered class, clean exit back to the menu.",
   "settings": { "lastClass": "mule" },
   "steps": [
     { "do": "waitFor", "until": "p.menu === 'main'", "timeoutMs": 60000 },
-    { "do": "click", "text": "Quick Play" },
+    { "do": "click", "text": "Quick Match" },
     { "do": "waitFor", "until": "p.online && p.alive === true", "timeoutMs": 60000 },
     { "do": "expect", "that": "p.classId === 'mule'", "label": "spawns as the remembered class" },
     { "do": "expect", "that": "p.ships >= 6 && p.humans === 1", "label": "bots backfill the public room" },

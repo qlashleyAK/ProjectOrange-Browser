@@ -11,6 +11,7 @@ import { Hud } from './hud/hud';
 import { InputManager } from './input/input';
 import { OfflineSource } from './modes/offline';
 import { OnlineSource, type NetStatus } from './modes/online';
+import { presenceTabId, serverApi } from './net/api';
 import { WorkerTransport, WsTransport } from './net/transport';
 import { CameraRig } from './render/camera';
 import { Effects } from './render/effects';
@@ -184,6 +185,7 @@ async function boot(): Promise<void> {
       createPrivate: () => void startOnline('private', randomCode()),
       joinPrivate: (code) => void startOnline('private', code),
       mapChanged: (id) => useArena(arenaById(id)),
+      api: () => (bestRegion ? serverApi(bestRegion.origin) : null),
     }, urlRoom);
     audio.startMusic('menu');
   };
@@ -525,10 +527,21 @@ async function boot(): Promise<void> {
     renderer.render(dt);
   };
 
+  // presence: "N pilots online · M in matches" on the menu, refreshed while it's up
+  const tabId = presenceTabId();
+  const pollPresence = () => {
+    if (session || !bestRegion || document.hidden) return;
+    serverApi(bestRegion.origin).presence(tabId).then((c) => {
+      menu.setPresence(`${c.online} ${c.online === 1 ? 'pilot' : 'pilots'} online · ${c.inMatch} in matches`);
+    }).catch(() => menu.setPresence(null));
+  };
+  setInterval(pollPresence, 20_000);
+
   void regionPing.then((r) => {
     bestRegion = r;
     menu.regionText = r ? `Region ${r.name} · ${Math.round(r.ping)} ms` : 'No server found — Practice works offline';
-    if (!session && menu.isOpen && !connecting) showMain();
+    if (!session && menu.isOpen && !connecting && menu.screen === 'main') showMain();
+    pollPresence();
   });
 
   /**

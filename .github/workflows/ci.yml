@@ -27,8 +27,8 @@ jobs:
             packages/client/dist
             packages/server/dist
 
-  # Boots the built client in headless Chromium and plays the offline smoke scenario
-  # (menu → practice vs bots → HUD → fire → pause → leave, clean console).
+  # Boots the built client in headless Chromium and plays the smoke scenarios: the offline loop
+  # (menu → practice vs bots → HUD → fire → pause → leave) and every main-menu screen, clean console.
   client-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -44,8 +44,11 @@ jobs:
       - run: pnpm --filter @orange/client build
       - name: Repro harness — practice smoke
         run: pnpm repro practice-smoke --out repro-out/practice-smoke
+      - name: Repro harness — menu shell
+        if: always()
+        run: pnpm repro menu-shell --out repro-out/menu-shell
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: repro-practice-smoke
-          path: repro-out/practice-smoke
+          name: repro-smoke
+          path: repro-out

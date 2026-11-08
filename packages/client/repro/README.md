@@ -10,8 +10,8 @@ pnpm repro practice-smoke           # a name from repro/scenarios, or a path
 pnpm repro my-bug.json --url https://staging.projectorange.nexus
 ```
 
-The harness starts the real game server on a free port (built client, persistence
-off), so both **Practice vs bots** and **Quick Play** work. `--url` targets a
+The harness starts the real game server on a free port (built client, in-memory
+database), so both **Practice vs bots** and **Quick Play** work. `--url` targets a
 deployed build instead. Use this to check a report against the exact
 `BUILD_VERSION` the player had.
 

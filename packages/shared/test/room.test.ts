@@ -84,6 +84,33 @@ describe('GameRoom', () => {
     expect(room.sim.ship(w.shipId)?.connected).toBe(true);
   });
 
+  it('keeps the identity token a pilot brings from another room or visit', () => {
+    const first = makeRoom('ONE');
+    const a = new FakeClient();
+    first.room.connect(a);
+    first.room.message(a, hello('Alice'));
+    const token = a.last('welcome')!.token;
+
+    // a fresh room has never seen this token: the pilot keeps it, so stats stay keyed to one identity
+    const second = makeRoom('TWO');
+    const b = new FakeClient();
+    second.room.connect(b);
+    second.room.message(b, hello('Alice', token));
+    expect(b.last('welcome')!.token).toBe(token);
+
+    // a second tab with the same token, while the first is still flying here, gets its own identity
+    const c = new FakeClient();
+    second.room.connect(c);
+    second.room.message(c, hello('Alice again', token));
+    expect(c.last('welcome')!.token).not.toBe(token);
+
+    // malformed tokens are never adopted
+    const d = new FakeClient();
+    second.room.connect(d);
+    second.room.message(d, hello('Mallory', 'NOT A TOKEN; DROP TABLE'));
+    expect(d.last('welcome')!.token).toMatch(/^[a-z0-9]{8,32}$/);
+  });
+
   it('drops a held slot after the grace period', () => {
     const { room, advance } = makeRoom();
     const a = new FakeClient();

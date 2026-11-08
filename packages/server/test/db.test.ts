@@ -74,6 +74,42 @@ describe('MatchStore', () => {
     expect(all.map((r) => r.handle)).toEqual(['Bob', 'Alice']); // kills desc
   });
 
+  it('profiles sum a token\'s matches and rank its ships by use', () => {
+    const s = fresh();
+    expect(s.profile('tokA')).toBeNull(); // never flown
+    s.recordMatch(report({
+      winnerPlayerId: 'p:aaa',
+      players: [
+        player({ playerId: 'p:aaa', token: 'tokA', name: 'Alice', classId: 'scythe', kills: 6, deaths: 1, orangesCollected: 9, peakPower: 7, shotsFired: 100, shotsHit: 40, placement: 1 }),
+        player({ playerId: 'p:bbb', token: 'tokB', name: 'Bob', kills: 1, placement: 2 }),
+      ],
+    }));
+    s.recordMatch(report({
+      matchNumber: 2, winnerPlayerId: 'p:bbb',
+      players: [
+        player({ playerId: 'p:bbb', token: 'tokB', name: 'Bob', kills: 9, placement: 1 }),
+        player({ playerId: 'p:aaa', token: 'tokA', name: 'Alice', classId: 'scythe', kills: 2, deaths: 3, orangesCollected: 1, peakPower: 3, placement: 2 }),
+      ],
+    }));
+    s.recordMatch(report({
+      matchNumber: 3, winnerPlayerId: null,
+      players: [player({ playerId: 'p:aaa', token: 'tokA', name: 'Alice', classId: 'brute', kills: 1, placement: 1 })],
+    }));
+    const p = s.profile('tokA')!;
+    expect(p.handle).toBe('Alice');
+    expect(p.matches).toBe(3);
+    expect(p.wins).toBe(1);
+    expect(p.kills).toBe(9);
+    expect(p.deaths).toBe(4);
+    expect(p.oranges).toBe(10);
+    expect(p.peak_power).toBe(7);
+    expect(p.best_placement).toBe(1);
+    expect(p.seconds).toBe(3 * 360);
+    expect(p.classes.map((c) => c.classId)).toEqual(['scythe', 'brute']);
+    expect(p.classes[0]).toMatchObject({ matches: 2, kills: 8 });
+    expect(s.profile('tokB')!.wins).toBe(1); // other pilots unaffected
+  });
+
   it('daily seeds are stable per date and rotate modes', () => {
     const s = fresh();
     const a = s.dailySeed('2026-11-08');

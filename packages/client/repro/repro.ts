@@ -139,7 +139,7 @@ function run(cmd: string, args: string[], cwd: string): Promise<void> {
   });
 }
 
-/** The real game server on a free port, serving the built client with persistence off. */
+/** The real game server on a free port, serving the built client, with an in-memory database (API live, nothing on disk). */
 async function startLocalServer(build: boolean): Promise<{ origin: string; proc: ChildProcess }> {
   const dist = join(clientDir, 'dist/index.html');
   if (build || !existsSync(dist)) {
@@ -150,7 +150,7 @@ async function startLocalServer(build: boolean): Promise<{ origin: string; proc:
   const tsx = join(serverDir, 'node_modules/.bin/tsx');
   const proc = spawn(tsx, ['src/index.ts'], {
     cwd: serverDir,
-    env: { ...process.env, PORT: String(port), ORANGE_DB: 'none', REGION: 'repro', STATIC_DIR: join(clientDir, 'dist') },
+    env: { ...process.env, PORT: String(port), ORANGE_DB: ':memory:', REGION: 'repro', STATIC_DIR: join(clientDir, 'dist') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let serverLog = '';
@@ -236,6 +236,8 @@ async function main(): Promise<number> {
     const settings = { ...DEFAULT_SETTINGS, ...(scenario.settings ?? {}) };
     await ctx.addInitScript((s) => { try { localStorage.setItem('orange.settings.v1', s); } catch { /* ignore */ } }, JSON.stringify(settings));
     const page = await ctx.newPage();
+    // software GL on a shared runner makes every round-trip slow; give actions room rather than flaking
+    page.setDefaultTimeout(120_000);
     const t0 = Date.now();
     const marks: Record<string, unknown> = {};
     const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
@@ -263,7 +265,7 @@ async function main(): Promise<number> {
     lines.push(`# Repro: ${scenario.name}`, '');
     if (scenario.description) lines.push(scenario.description, '');
     lines.push(
-      `- **Target:** ${args.url ? origin : 'local server (built client, persistence off)'} — server build ${ping.version}`,
+      `- **Target:** ${args.url ? origin : 'local server (built client, in-memory DB)'} — server build ${ping.version}`,
       `- **Client build:** ${String(first?.version ?? '?')} (${String(first?.buildTime ?? '?')})`,
       `- **Browser:** headless Chromium ${browser.version()} · ${gl} · ${w}×${h}`,
       `- **Scenario:** \`${args.scenario}\``,
@@ -279,10 +281,9 @@ async function main(): Promise<number> {
       }
     })();
 
-    const canvasCenter = async () => {
-      const b = await page.locator('#game').boundingBox();
-      return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : { x: w / 2, y: h / 2 };
-    };
+    // the game canvas is fixed full-viewport, so its centre is the viewport's — no page round-trip needed
+    // (on a starved CI runner, locator queries alone have taken > 30 s)
+    const canvasCenter = async () => ({ x: w / 2, y: h / 2 });
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const st = scenario.steps[i]!;
