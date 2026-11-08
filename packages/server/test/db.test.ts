@@ -5,7 +5,7 @@ import type { MatchReport, MatchReportPlayer } from '@orange/shared';
 function player(partial: Partial<MatchReportPlayer> & { playerId: string; name: string }): MatchReportPlayer {
   return {
     token: null, classId: 'dart', isBot: false, kills: 0, deaths: 0, assists: 0, damageDealt: 0,
-    shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0, placement: 1, ...partial,
+    shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0, score: 0, placement: 1, ...partial,
   };
 }
 

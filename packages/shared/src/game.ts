@@ -11,14 +11,14 @@ import { NavGraph } from './bots/nav.js';
 import { botCanSee, cloakVisible } from './bots/perception.js';
 import { CLASSES, CLASS_IDS, type ClassId, type PrimaryDef } from './classes/index.js';
 import {
-  DT, MAX_POWER, RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
+  CHECKPOINT_RADIUS, DT, MAX_PARTICIPANTS, MAX_POWER, MINE_RUN_CHECKPOINTS, RESPAWN_DELAY_S, SURVIVAL_WAVE_BASE, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
   stepSafeCharge,
 } from './constants.js';
 import { recordPose } from './combat/hitVolumes.js';
 import { endMissile, launchSecondary, updateLock, updateMissiles } from './combat/missiles.js';
 import { endProjectile, updateProjectiles } from './combat/projectiles.js';
 import { firePrimary } from './combat/weapons.js';
-import type { GameEvent, Missile, Pickup, Projectile, Ship } from './entities.js';
+import type { GameEvent, GameMode, Missile, Pickup, Projectile, Ship } from './entities.js';
 import { applyFlightControl, newFlightState } from './flight.js';
 import { InputFlag, neutralInput } from './input.js';
 import { chooseSpawn, newMatch, updateMatch, type MatchState } from './match.js';
@@ -38,6 +38,8 @@ export interface GameSimOptions {
   arena?: ArenaData;
   /** the map to load once a match's results have been shown; without it every match replays the same one */
   nextArena?: (current: ArenaData) => ArenaData;
+  /** match mode: classic FFA (default) or one of the rotating daily challenge modes */
+  mode?: GameMode;
 }
 
 export const ACCENT_COUNT = 10;
@@ -62,6 +64,14 @@ export class GameSim {
   powerups: PowerupState = newPowerupState();
   events: GameEvent[] = [];
   match: MatchState = newMatch();
+  /** active match mode (ffa default; daily modes change win conditions + scoring) */
+  mode: GameMode = 'ffa';
+  /** survival: current wave (0 before the first spawns) */
+  wave = 0;
+  /** survival: tick the next wave spawns at (-1 = idle) */
+  waveNextAtTick = -1;
+  /** mine-run: the checkpoint course for the current match */
+  course: V3[] = [];
   bots = new Map<number, BotBrain>();
   combatLog: { pos: V3; tick: number; place: string | undefined }[] = [];
   lastOrangeRegion = '';
@@ -78,6 +88,7 @@ export class GameSim {
     this.warmupSeconds = opts.offline ? WARMUP_OFFLINE_S : WARMUP_S;
     this.botSkill = opts.botSkill ?? 'normal';
     this.nextArena = opts.nextArena;
+    this.mode = opts.mode ?? 'ffa';
     this.loadArena(opts.arena ?? generateArena(hollowdeep()));
     this.eventQueue = new R.EventQueue(true);
   }
@@ -120,7 +131,7 @@ export class GameSim {
   nextMissileId(): number { this.missileId = (this.missileId + 1) & 0xffff; return this.missileId; }
   nextPickupId(): number { this.pickupId = (this.pickupId + 1) & 0xffff; return this.pickupId; }
   damageEnabled(): boolean { return this.match.phase === 'inProgress'; }
-  weaponsEnabled(): boolean { return this.match.phase === 'inProgress' || this.match.phase === 'waiting'; }
+  weaponsEnabled(): boolean { return this.match.phase === 'inProgress' && this.mode !== 'mine-run' || this.match.phase === 'waiting'; }
   liveProjectilesOf(id: number): number { return this.projCount.get(id) ?? 0; }
   noteCombat(pos: V3): void {
     this.combatLog.push({ pos: { ...pos }, tick: this.tick, place: placeAt(this.arena, pos)?.id });
@@ -146,7 +157,7 @@ export class GameSim {
     return this.shipList.length % ACCENT_COUNT;
   }
 
-  addPlayer(playerId: string, name: string, classId: ClassId, isBot = false): Ship {
+  addPlayer(playerId: string, name: string, classId: ClassId, isBot = false, botSkill?: BotSkill): Ship {
     const id = this.freeId();
     const def = CLASSES[classId];
     const s: Ship = {
@@ -161,24 +172,25 @@ export class GameSim {
       sweepUntil: 0, sweepRevealed: new Set(), lock: { targetId: -1, progress: 0, locked: false }, secondaryHeld: false,
       spawnProtectedUntil: 0, safe: false, safeCharge: SAFE_ZONE_CHARGE_S, powerup: null, powerupUntil: 0,
       deathTick: this.tick - RESPAWN_DELAY_S / DT, respawnAt: this.tick, holdSpawn: false, removeAtDeath: false,
+      checkpoint: 0, courseDoneTick: 0,
       stats: { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 },
       damagers: new Set(), input: neutralInput(), prevFlags: 0, lagTicks: 0, lockWarn: 0, missileWarn: 0, poseHistory: [],
     };
     this.ships.set(id, s);
     this.rebuildList();
-    if (isBot) this.bots.set(id, new BotBrain(id, this.botSkill, this.rng.int(1, 1e9)));
+    if (isBot) this.bots.set(id, new BotBrain(id, botSkill ?? this.botSkill, this.rng.int(1, 1e9)));
     this.spawnShip(s);
     return s;
   }
 
-  addBot(): Ship {
+  addBot(skill?: BotSkill): Ship {
     const used = new Set(this.shipList.map((s) => s.name));
     const name = BOT_NAMES.find((n) => !used.has(n)) ?? `Bot${this.shipList.length}`;
     const counts = new Map<ClassId, number>(CLASS_IDS.map((c) => [c, 0]));
     for (const s of this.shipList) counts.set(s.pendingClass, (counts.get(s.pendingClass) ?? 0) + 1);
     const min = Math.min(...counts.values());
     const pool = CLASS_IDS.filter((c) => counts.get(c) === min);
-    return this.addPlayer(`bot:${name}`, name, this.rng.pick(pool), true);
+    return this.addPlayer(`bot:${name}`, name, this.rng.pick(pool), true, skill);
   }
 
   removePlayer(id: number): void {
@@ -225,7 +237,8 @@ export class GameSim {
     for (const m of this.missiles.slice()) if (m.ownerId === ownerId) endMissile(this, m, 'owner', m.pos, false);
   }
 
-  private despawn(s: Ship): void {
+  /** Remove a ship from the world (death, round reset, or removal). */
+  despawn(s: Ship): void {
     losePowerup(this, s, 'reset');
     if (s.body) {
       const b = s.body;
@@ -352,12 +365,40 @@ export class GameSim {
     for (const p of this.pickups) this.emit({ t: 'pickupExpire', id: p.id });
     this.pickups = [];
     this.combatLog = [];
+    this.wave = 0;
+    this.waveNextAtTick = -1;
+    this.course = this.mode === 'mine-run' ? this.buildCourse() : [];
     for (const s of this.shipList) {
       s.stats = { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 };
+      s.checkpoint = 0;
+      s.courseDoneTick = 0;
       if (s.alive) this.despawn(s);
     }
     resetPowerups(this);
     for (const s of this.shipList) this.spawnShip(s);
+  }
+
+  /** mine-run: seeded course over the arena's spawn points (every pilot flies the same line). */
+  private buildCourse(): V3[] {
+    const spawns = this.arena.spawns.map((sp) => ({ ...sp.pos }));
+    const course: V3[] = [];
+    while (course.length < MINE_RUN_CHECKPOINTS && spawns.length) {
+      course.push(spawns.splice(this.rng.int(0, spawns.length - 1), 1)[0]!);
+    }
+    return course;
+  }
+
+  /** survival: spawn the next wave — bots die for good, skill ramps with the wave count. */
+  spawnWave(): void {
+    this.wave++;
+    const count = SURVIVAL_WAVE_BASE + this.wave - 1;
+    const skills: BotSkill[] = ['easy', 'normal', 'hard'];
+    for (let i = 0; i < count; i++) {
+      if (this.shipList.length >= MAX_PARTICIPANTS) break;
+      const bot = this.addBot(skills[Math.min(skills.length - 1, Math.floor((this.wave - 1) / 2))]);
+      bot.removeAtDeath = true;
+    }
+    this.emit({ t: 'wave', wave: this.wave, count });
   }
 
   // ---------------------------------------------------------------- tick
@@ -411,11 +452,28 @@ export class GameSim {
     this.tick++;
     updateMatch(this);
 
-    // respawns
+    // respawns (survival: dead humans stay dead — the run ends when the last pilot falls)
     for (const s of this.shipList) {
       if (s.alive || !s.connected) continue;
+      if (this.mode === 'survival' && !s.isBot) continue;
+      // dead-for-good ships must not resurrect before the removal sweep collects them
+      if (s.removeAtDeath) continue;
       const holdOver = this.tick >= s.deathTick + Math.round(RESPAWN_HOLD_MAX_S / DT);
       if (this.tick >= s.respawnAt && (!s.holdSpawn || holdOver)) this.spawnShip(s);
+    }
+
+    // mine-run: checkpoint pass-through
+    if (this.mode === 'mine-run' && this.course.length) {
+      for (const s of this.shipList) {
+        if (!s.alive || s.checkpoint >= this.course.length) continue;
+        const cp = this.course[s.checkpoint]!;
+        const dx = s.pos.x - cp.x, dy = s.pos.y - cp.y, dz = s.pos.z - cp.z;
+        if (dx * dx + dy * dy + dz * dz <= CHECKPOINT_RADIUS * CHECKPOINT_RADIUS) {
+          s.checkpoint++;
+          this.emit({ t: 'checkpoint', shipId: s.id, index: s.checkpoint, total: this.course.length, pos: { ...cp } });
+          if (s.checkpoint >= this.course.length) s.courseDoneTick = this.tick;
+        }
+      }
     }
 
     // bots think

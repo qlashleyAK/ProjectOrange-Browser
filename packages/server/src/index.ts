@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, type ClientLink, type MatchReport } from '@orange/shared';
+import { ARENAS, arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, todayChallenge, type ClientLink, type MatchReport } from '@orange/shared';
 import { MatchStore, openDb } from './db.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
@@ -32,6 +32,21 @@ const sink = store
   : undefined;
 
 function log(msg: string): void { console.log(`[${new Date().toISOString()}] ${msg}`); }
+
+/** Today's daily-challenge room: mode + seed + arena fixed by the date, shared by everyone. */
+function dailyRoom(): GameRoom {
+  const c = todayChallenge();
+  const id = `DAILY-${c.date}`;
+  let r = rooms.get(id);
+  if (!r) {
+    const arena = ARENAS[c.seed % ARENAS.length]!.id;
+    r = new GameRoom({ id, isPrivate: false, arena, mode: c.mode, seed: c.seed, rotation: false, log, sink });
+    r.start();
+    rooms.set(id, r);
+    log(`daily room ${id} created (${c.mode}, seed ${c.seed}, ${arenaInfo(arena).name})`);
+  }
+  return r;
+}
 
 /** The arena only picks where a new room's rotation starts; joiners get whatever map the room is on. */
 function getRoom(id: string, isPrivate: boolean, arena = DEFAULT_ROOM_ARENA): GameRoom {
@@ -119,8 +134,16 @@ async function main(): Promise<void> {
       return;
     }
     if (store && url.pathname === '/api/daily') {
+      const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify(store.dailySeed(new Date().toISOString().slice(0, 10))));
+      res.end(JSON.stringify(store.dailySeed(date)));
+      return;
+    }
+    if (store && url.pathname === '/api/daily/leaderboard') {
+      const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ date, rows: store.dailyLeaderboard(date, limit) }));
       return;
     }
     serveStatic(req, res, url.pathname);
@@ -133,8 +156,9 @@ async function main(): Promise<void> {
     const code = sanitizeCode(url.searchParams.get('room') ?? '');
     const isPrivate = url.searchParams.get('private') === '1';
     const arena = arenaParam(url);
+    const daily = url.searchParams.get('daily') === '1';
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const room = code ? getRoom(code, isPrivate || !code.startsWith('PUB'), arena) : quickplayRoom(arena);
+      const room = daily ? dailyRoom() : code ? getRoom(code, isPrivate || !code.startsWith('PUB'), arena) : quickplayRoom(arena);
       attach(ws, room);
     });
   });

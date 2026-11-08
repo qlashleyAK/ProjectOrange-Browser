@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { MatchReport } from '@orange/shared';
+import { dailyChallenge, type MatchReport } from '@orange/shared';
 
 /**
  * SQLite persistence for matches, players and daily seeds. Uses node:sqlite
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS match_players (
   hits        INTEGER NOT NULL,
   oranges     INTEGER NOT NULL,
   peak_power  INTEGER NOT NULL,
+  score       INTEGER NOT NULL DEFAULT 0,
   placement   INTEGER NOT NULL,
   PRIMARY KEY (match_id, player_id)
 );
@@ -82,10 +83,10 @@ export class MatchStore {
         .run(r.roomId, r.arena, r.mode, r.matchNumber, now - r.durationS * 1000, now, r.durationS, r.winnerPlayerId, humans.length, r.players.length - humans.length);
       const matchId = Number(m.lastInsertRowid);
       const ins = this.db.prepare(
-        'INSERT INTO match_players (match_id, player_id, token, name, is_bot, class_id, kills, deaths, assists, damage, shots, hits, oranges, peak_power, placement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO match_players (match_id, player_id, token, name, is_bot, class_id, kills, deaths, assists, damage, shots, hits, oranges, peak_power, score, placement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
       for (const p of r.players) {
-        ins.run(matchId, p.playerId, p.token, p.name, p.isBot ? 1 : 0, p.classId, p.kills, p.deaths, p.assists, p.damageDealt, p.shotsFired, p.shotsHit, p.orangesCollected, p.peakPower, p.placement);
+        ins.run(matchId, p.playerId, p.token, p.name, p.isBot ? 1 : 0, p.classId, p.kills, p.deaths, p.assists, p.damageDealt, p.shotsFired, p.shotsHit, p.orangesCollected, p.peakPower, p.score, p.placement);
         if (!p.isBot && p.token) {
           this.db
             .prepare('INSERT INTO players (token, handle, created_at, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET handle = excluded.handle, last_seen = excluded.last_seen')
@@ -128,19 +129,27 @@ export class MatchStore {
     ).all(limit);
   }
 
-  /** Deterministic daily challenge seed: same date + mode rotation for every server. */
+  /** Deterministic daily challenge (shared dailyChallenge fn, cached for the record). */
   dailySeed(date: string): { date: string; mode: string; seed: number } {
-    const existing = this.db.prepare('SELECT date, mode, seed FROM daily_seeds WHERE date = ?').get(date) as { date: string; mode: string; seed: number } | undefined;
-    if (existing) return existing;
-    // rotation: survival / score-attack / mine-run by day-of-cycle; seed from the date string
-    const MODES = ['survival', 'score-attack', 'mine-run'] as const;
-    const days = Math.floor(Date.parse(date + 'T00:00:00Z') / 86400000);
-    const mode = MODES[days % MODES.length]!;
-    let h = 2166136261;
-    for (const ch of date) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
-    const seed = (h ^ (days * 2654435761)) >>> 0;
-    this.db.prepare('INSERT OR IGNORE INTO daily_seeds (date, mode, seed) VALUES (?, ?, ?)').run(date, mode, seed);
-    return { date, mode, seed };
+    const challenge = dailyChallenge(date);
+    this.db.prepare('INSERT OR IGNORE INTO daily_seeds (date, mode, seed) VALUES (?, ?, ?)').run(challenge.date, challenge.mode, challenge.seed);
+    return challenge;
+  }
+
+  /** Daily leaderboard: everyone's mode score on a given day's challenge, best first. */
+  dailyLeaderboard(date: string, limit = 50): unknown[] {
+    const c = dailyChallenge(date);
+    const from = Date.parse(date + 'T00:00:00Z');
+    const to = from + 86400000;
+    return this.db.prepare(`
+      SELECT COALESCE(p.handle, mp.name) AS handle, mp.score, mp.kills, mp.deaths, mp.oranges, mp.placement, m.ended_at, m.arena
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.match_id
+      LEFT JOIN players p ON p.token = mp.token
+      WHERE mp.is_bot = 0 AND m.mode = ? AND m.ended_at >= ? AND m.ended_at < ?
+      ORDER BY mp.score DESC, mp.placement ASC
+      LIMIT ?`,
+    ).all(c.mode, from, to, limit);
   }
 
   close(): void { this.db.close(); }
