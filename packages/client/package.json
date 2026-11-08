@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@orange/shared": "workspace:*",
+    "n8ao": "2.0.1",
     "postprocessing": "^6.39.0",
     "three": "^0.186.0"
   },

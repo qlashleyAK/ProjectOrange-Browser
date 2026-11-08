@@ -171,7 +171,10 @@ async function boot(): Promise<void> {
     if (settings.quality !== 'auto') renderer.setQuality(settings.quality);
     audio.applyVolumes();
     effects.debrisEnabled = renderer.profile.debris;
+    effects.setDust(renderer.profile.dust);
+    effects.setBudget(renderer.profile.particles);
     lights.dynamicLimit = renderer.profile.dynamicLights;
+    lights.setShadowQuality(renderer.profile.shadows);
   };
   onSettings(applySettings);
   applySettings();
@@ -604,7 +607,8 @@ async function boot(): Promise<void> {
       ships: roster.length, bots: roster.filter((r) => r.isBot).length, humans: roster.filter((r) => !r.isBot).length,
     };
   };
-  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings, probe: stateProbe };
+  // effects and lights are here for poking at visuals from the console (e.g. orange.effects.fireball(...))
+  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings, effects, lights, probe: stateProbe };
 
   bootEl.classList.add('gone');
   setTimeout(() => bootEl.remove(), 600);

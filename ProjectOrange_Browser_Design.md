@@ -78,7 +78,7 @@ placeholders the owner may rename.
 | Multiplayer framework | **Colyseus** (current release) for rooms, matchmaking, reconnection, and low-rate state sync. Custom binary messages for high-rate inputs/snapshots. | Solves the boring parts (rooms, join codes, reconnect, schema delta sync). Prediction/interpolation is ours either way; see Section 13. |
 | Transport | WebSocket (via Colyseus) for v1. Abstract it so WebTransport datagrams can be added later where supported. | Universal support. Head-of-line blocking is acceptable at ≤ 8 players. |
 | Build | **Vite** + pnpm workspaces | Fast dev loop, static deploy. |
-| Post-processing | `postprocessing` (pmndrs): bloom, tonemapping, SMAA | Emissive weapons/oranges need bloom to read. |
+| Post-processing | `postprocessing` (pmndrs): bloom, tonemapping, grade, SMAA; `n8ao` for SSAO (High) | Emissive weapons/oranges need bloom to read. |
 | UI | DOM + CSS overlay for the HUD; Preact (optional) for menus | Crisp text, cheap. |
 | Audio | WebAudio; mostly synthesized SFX + a couple of compressed loops | Tiny download. |
 | Tests | Vitest (headless sim, physics, power math, netcode harness) | Fast, TS-native. |
@@ -1265,7 +1265,8 @@ Weapon colors stay away from the reserved orange hue:
 ### 14.2 Renderer
 
 - **Renderer:** `WebGLRenderer({ antialias: false, powerPreference: 'high-performance' })`,
-  then post: bloom, ACES tonemapping, SMAA. sRGB output.
+  then post: SSAO (High only, half resolution), bloom, ACES tonemapping, a light
+  grade (+saturation, +contrast, vignette; hue untouched), SMAA. sRGB output.
 - **Environment:** `RoomEnvironment` through PMREM for metal reflections.
 - **Static lighting:**
   - per room, 1–2 point/spot lights in the landmark color plus a dim
@@ -1284,9 +1285,13 @@ Weapon colors stay away from the reserved orange hue:
 
   | Profile | Contents |
   |---|---|
-  | Low | no bloom, 0.75 render scale, 2 dynamic lights, no debris |
-  | Default | bloom, 1.0 scale, 4 dynamic lights |
-  | High | + shadow from each room's main light, SSAO, more particles |
+  | Low | no bloom, 0.75 render scale, 2 dynamic lights, no debris, half the sparks |
+  | Default | bloom, 1.0 scale, 4 dynamic lights, ambient dust |
+  | High | + soft ship shadows from the nearest room light (the moon casts instead, arena included, on outdoor maps), SSAO, 1.5× sparks and debris |
+
+  Shadows: exactly one light casts at a time so shader variants stay fixed.
+  Indoors only ships cast, so walls never self-shadow; a cloaked ship's
+  shimmer casts no shadow.
 
 - **Tells vs cosmetics.** Gameplay never reads visual settings. Lower
   profiles may cut **cosmetic** effects only, never **tells**:
