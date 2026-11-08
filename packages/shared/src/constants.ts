@@ -34,6 +34,13 @@ export const MATCH_DURATION_S = 6 * 60;
 export const WARMUP_S = 5;
 export const WARMUP_OFFLINE_S = 3;
 export const POSTMATCH_S = 12;
+
+// Daily challenge modes (rotate by date; seeded per day — see shared/src/daily.ts)
+export const DAILY_MATCH_DURATION_S = 5 * 60;
+export const SURVIVAL_WAVE_BASE = 2;
+export const SURVIVAL_WAVE_GAP_S = 5;
+export const MINE_RUN_CHECKPOINTS = 10;
+export const CHECKPOINT_RADIUS = 18;
 export const RESPAWN_DELAY_S = 3;
 export const RESPAWN_HOLD_MAX_S = 15;
 export const SPAWN_PROTECTION_S = 2;

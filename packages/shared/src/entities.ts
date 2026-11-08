@@ -63,6 +63,10 @@ export interface Ship {
   respawnAt: number;
   holdSpawn: boolean;
   removeAtDeath: boolean;
+  /** mine-run: checkpoints hit so far */
+  checkpoint: number;
+  /** mine-run: tick the course was completed (0 = not yet) */
+  courseDoneTick: number;
 
   stats: ShipStats;
   damagers: Set<number>;
@@ -142,6 +146,8 @@ export type GameEvent =
   | { t: 'scrape'; shipId: number; pos: V3; force: number }
   | { t: 'phase'; phase: MatchPhase }
   | { t: 'matchEnd'; winnerId: number }
+  | { t: 'wave'; wave: number; count: number }
+  | { t: 'checkpoint'; shipId: number; index: number; total: number; pos: V3 }
   | { t: 'lockOn'; shipId: number; targetId: number }
   | { t: 'powerupSpawn'; id: number; kind: PowerupKind; pos: V3 }
   | { t: 'powerupTake'; id: number; shipId: number; kind: PowerupKind; pos: V3; until: number; nextTick: number; nextPos: V3 }
@@ -150,3 +156,5 @@ export type GameEvent =
   | { t: 'powerupClear' };
 
 export type MatchPhase = 'waiting' | 'warmup' | 'inProgress' | 'postMatch';
+/** match modes: classic FFA plus the rotating daily challenge modes (shared/src/daily.ts) */
+export type GameMode = 'ffa' | 'score-attack' | 'survival' | 'mine-run';

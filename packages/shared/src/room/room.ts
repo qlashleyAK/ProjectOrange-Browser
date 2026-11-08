@@ -6,7 +6,7 @@ import {
 } from '../constants.js';
 import { cloakVisible } from '../bots/perception.js';
 import type { BotSkill } from '../bots/brain.js';
-import type { GameEvent, Ship } from '../entities.js';
+import type { GameEvent, GameMode, Ship } from '../entities.js';
 import { GameSim } from '../game.js';
 import { InputFlag, neutralInput, seqDiff, type InputCmd } from '../input.js';
 import {
@@ -48,9 +48,12 @@ export interface RoomOptions {
   isPrivate?: boolean;
   offline?: boolean;
   botSkill?: BotSkill;
-  seed?: number;
   /** arena id from the registry (defaults to DEFAULT_ARENA): the first map of the rotation */
   arena?: string;
+  /** seed for daily rooms — fixes the arena's random layout + bot spawns + course */
+  seed?: number;
+  /** match mode: ffa default, or a daily challenge mode (survival / score-attack / mine-run) */
+  mode?: GameMode;
   /** move to the next map after every match (default true) */
   rotation?: boolean;
   /** receives the MatchReport of every finished match (server-side persistence) */
@@ -105,6 +108,7 @@ export class GameRoom {
       seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline,
       botSkill: o.botSkill ?? 'normal', arena: arenaById(o.arena ?? DEFAULT_ARENA),
       nextArena: o.rotation === false ? undefined : nextInRotation,
+      mode: o.mode ?? 'ffa',
     });
     this.lastHumanAt = this.now();
     this.backfill();
@@ -118,6 +122,8 @@ export class GameRoom {
   get hasFreeSlot(): boolean { return this.humans < MAX_PARTICIPANTS; }
 
   private backfill(): void {
+    // survival waves and mine-run courses manage their own populations
+    if (this.sim.mode === 'survival' || this.sim.mode === 'mine-run') return;
     // keep at least BOT_BACKFILL_TARGET participants; un-flag pending removals first
     let n = this.participants;
     for (const s of this.sim.shipList) {
@@ -471,7 +477,7 @@ export class GameRoom {
         for (const c of this.byToken.values()) if (c.shipId === shipId && c.connected) return c.token;
         return null;
       };
-      this.sink.onMatchEnd(buildMatchReport(this.sim, { roomId: this.id, mode: this.offline ? 'offline' : 'ffa', tokenOf }));
+      this.sink.onMatchEnd(buildMatchReport(this.sim, { roomId: this.id, mode: this.sim.mode, tokenOf }));
     } catch (e) {
       this.log(`room ${this.id}: match sink failed (${String(e)})`);
     }

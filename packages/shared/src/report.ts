@@ -1,7 +1,7 @@
 import type { ClassId } from './classes/types.js';
 import { DT } from './constants.js';
 import type { GameSim } from './game.js';
-import { standings } from './match.js';
+import { modeScore, ranked } from './match.js';
 
 /** One player's final line in a finished match. `token` is server-side only — never wire-broadcast. */
 export interface MatchReportPlayer {
@@ -19,6 +19,8 @@ export interface MatchReportPlayer {
   shotsHit: number;
   orangesCollected: number;
   peakPower: number;
+  /** mode score at match end (kills for ffa; daily modes rank on this) */
+  score: number;
   /** 1-based, standings order (kills desc, deaths asc, damage desc) */
   placement: number;
 }
@@ -46,7 +48,7 @@ export function buildMatchReport(
   sim: GameSim,
   opts: { roomId: string; mode: string; tokenOf?: (shipId: number) => string | null },
 ): MatchReport {
-  const order = standings(sim.shipList);
+  const order = ranked(sim);
   const winner = sim.match.winnerId >= 0 ? sim.shipList.find((s) => s.id === sim.match.winnerId) : undefined;
   return {
     roomId: opts.roomId,
@@ -71,6 +73,7 @@ export function buildMatchReport(
       shotsHit: s.stats.shotsHit,
       orangesCollected: s.stats.orangesCollected,
       peakPower: Math.round(s.stats.peakPower),
+      score: modeScore(s, sim.mode, sim),
       placement: i + 1,
     })),
   };
