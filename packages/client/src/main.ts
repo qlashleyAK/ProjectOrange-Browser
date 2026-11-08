@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  arenaById, BULWARK_ABSORB, CLASS_LIST, initPhysics, lineOfSight, placeAt,
+  arenaById, BUILD_VERSION, BULWARK_ABSORB, CLASS_LIST, initPhysics, lineOfSight, placeAt,
   type ArenaData, type ClassId, type GameEvent, type Theme,
 } from '@orange/shared';
 import './style.css';
@@ -531,7 +531,35 @@ async function boot(): Promise<void> {
     if (!session && menu.isOpen && !connecting) showMain();
   });
 
-  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings };
+  /**
+   * JSON-safe state snapshot for the headless repro harness (packages/client/repro) and for bug reports.
+   * Scenario files read these fields by name: extend the shape, don't rename fields.
+   */
+  const stateProbe = () => {
+    const src = session?.source ?? null;
+    const L = src?.local() ?? null;
+    const m = src?.match() ?? null;
+    const roster = src?.roster() ?? [];
+    const me = L ? roster.find((r) => r.id === L.shipId) : undefined;
+    const v = src?.ships().find((s) => s.isLocal);
+    const net = src?.netStats() ?? null;
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    return {
+      version: BUILD_VERSION, buildTime: __BUILD_TIME__,
+      mode: session ? session.kind : 'menu', online: src?.online ?? false, connecting, paused,
+      menu: menu.screen, arena: arena.blueprint.id, fps: Math.round(fpsAvg), quality: renderer.quality,
+      pointerLocked: input.pointerLocked, inputEnabled: input.enabled,
+      ping: net ? Math.round(net.ping) : null, corrections: net ? r1(net.corrections) : null,
+      phase: m?.phase ?? null, timeLeft: m ? Math.round(m.timeLeft) : null,
+      alive: L?.alive ?? null, classId: L ? L.def.id : null, hull: L ? r1(L.hull) : null, shield: L ? r1(L.shield) : null,
+      power: L?.power ?? null, tier: L?.tier.index ?? null,
+      pos: v ? { x: r1(v.pos.x), y: r1(v.pos.y), z: r1(v.pos.z) } : null,
+      speed: v ? r1(Math.hypot(v.vel.x, v.vel.y, v.vel.z)) : null,
+      kills: me?.kills ?? null, deaths: me?.deaths ?? null,
+      ships: roster.length, bots: roster.filter((r) => r.isBot).length, humans: roster.filter((r) => !r.isBot).length,
+    };
+  };
+  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings, probe: stateProbe };
 
   bootEl.classList.add('gone');
   setTimeout(() => bootEl.remove(), 600);

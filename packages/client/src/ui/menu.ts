@@ -48,6 +48,8 @@ export class Menu {
   private back: (() => void) | null = null;
   regionText = '';
   isOpen = false;
+  /** which screen is showing ('main', 'pause', 'settings', ...; null when hidden) — read by the repro harness probe */
+  screen: string | null = null;
 
   constructor(container: HTMLElement) {
     this.root = h('div', 'overlay hidden', container);
@@ -56,20 +58,21 @@ export class Menu {
     this.panel.style.minWidth = '420px';
   }
 
-  private open(): HTMLDivElement {
+  private open(screen: string): HTMLDivElement {
+    this.screen = screen;
     this.isOpen = true;
     this.root.classList.remove('hidden');
     this.panel.innerHTML = '';
     return this.panel;
   }
 
-  hide(): void { this.isOpen = false; this.root.classList.add('hidden'); this.back = null; }
+  hide(): void { this.isOpen = false; this.screen = null; this.root.classList.add('hidden'); this.back = null; }
 
   /** Esc inside a sub-screen returns to the previous screen; returns false if there is none. */
   goBack(): boolean { if (!this.back) return false; const b = this.back; this.back = null; b(); return true; }
 
   showMain(a: MainMenuActions, roomFromUrl: string | null): void {
-    const p = this.open();
+    const p = this.open('main');
     this.back = null;
     h('h1', '', p, 'PROJECT <span class="orange">ORANGE</span>');
     h('div', 'sub', p, 'Six-degrees-of-freedom arena combat.');
@@ -112,7 +115,7 @@ export class Menu {
   }
 
   showPause(a: PauseActions): void {
-    const p = this.open();
+    const p = this.open('pause');
     this.back = null;
     h('h2', '', p, a.online ? 'MENU' : 'PAUSED');
     if (a.online) h('div', 'sub', p, 'The match keeps running while this menu is open.');
@@ -128,7 +131,7 @@ export class Menu {
   }
 
   showControls(back: () => void): void {
-    const p = this.open();
+    const p = this.open('controls');
     this.back = back;
     h('h2', '', p, 'CONTROLS');
     const k = h('div', 'keys', p);
@@ -138,7 +141,7 @@ export class Menu {
   }
 
   showMessage(title: string, sub: string, actions: { label: string; fn: () => void }[] = []): void {
-    const p = this.open();
+    const p = this.open(`message:${title}`);
     this.back = null;
     h('h2', 'connecting', p, esc(title));
     if (sub) h('div', 'sub', p, esc(sub));
@@ -146,7 +149,7 @@ export class Menu {
   }
 
   showSettings(back: () => void, tab: 'controls' | 'video' | 'audio' | 'access' | 'game' = 'controls'): void {
-    const p = this.open();
+    const p = this.open('settings');
     this.back = back;
     h('h2', '', p, 'SETTINGS');
     const tabs = h('div', 'tabs', p);
