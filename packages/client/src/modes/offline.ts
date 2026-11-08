@@ -1,5 +1,5 @@
 import {
-  activePrimary, cloakVisible, DT, GameSim, nextInRotation, powerupInfo, powerupLeft, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3,
+  activePrimary, cloakVisible, DT, GameSim, modeScore, nextInRotation, powerupInfo, powerupLeft, qslerp, q4, RESPAWN_HOLD_MAX_S, safeZoneAt, v3,
   vlerp, type ArenaData, type BotSkill, type ClassId, type GameEvent, type InputCmd, type RosterEntry, type Ship,
 } from '@orange/shared';
 import type { LocalState, MatchView, MissileView, PickupView, PowerupView, ProjView, ShipView, ViewSource } from '../view';
@@ -17,7 +17,7 @@ export function rosterOf(sim: GameSim, pingOf: (s: Ship) => number = () => 0): R
     kills: s.stats.kills, deaths: s.stats.deaths, assists: s.stats.assists, power: s.power, ping: pingOf(s),
     alive: s.alive, connected: s.connected, damage: Math.round(s.stats.damageDealt), shotsFired: s.stats.shotsFired,
     shotsHit: s.stats.shotsHit, oranges: s.stats.orangesCollected, peakPower: s.stats.peakPower, tier: s.tier.index,
-    maxShield: s.maxShield,
+    maxShield: s.maxShield, score: modeScore(s, sim.mode, sim), checkpoint: s.checkpoint,
   }));
 }
 
@@ -29,6 +29,7 @@ export function matchViewOf(sim: GameSim): MatchView {
     winnerId: m.winnerId,
     elapsed: m.phase === 'inProgress' ? (sim.tick - m.startTick) * DT : 0,
     nextArena: sim.upcomingArena().blueprint.id,
+    mode: sim.mode, wave: sim.wave, course: sim.course,
   };
 }
 

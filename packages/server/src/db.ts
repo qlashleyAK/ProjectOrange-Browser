@@ -61,6 +61,14 @@ export interface LeaderboardRow {
   matches: number; damage: number; best_placement: number; last_seen: number;
 }
 
+export interface PilotProfile {
+  handle: string; firstSeen: number; lastSeen: number;
+  matches: number; wins: number; kills: number; deaths: number; assists: number; damage: number;
+  shots: number; hits: number; oranges: number; peak_power: number; best_placement: number; seconds: number;
+  /** most-flown first */
+  classes: { classId: string; matches: number; kills: number }[];
+}
+
 /** `:memory:` for tests; a file path for production (`ORANGE_DB` env). */
 export function openDb(path: string): DatabaseSync {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -122,6 +130,29 @@ export class MatchStore {
     return rows;
   }
 
+  /** Lifetime stats for one identity token, or null if it has never finished a match. */
+  profile(token: string): PilotProfile | null {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS matches,
+             SUM(CASE WHEN m.winner = mp.player_id THEN 1 ELSE 0 END) AS wins,
+             SUM(mp.kills) AS kills, SUM(mp.deaths) AS deaths, SUM(mp.assists) AS assists,
+             SUM(mp.damage) AS damage, SUM(mp.shots) AS shots, SUM(mp.hits) AS hits,
+             SUM(mp.oranges) AS oranges, MAX(mp.peak_power) AS peak_power, MIN(mp.placement) AS best_placement,
+             SUM(m.duration_s) AS seconds
+      FROM match_players mp JOIN matches m ON m.id = mp.match_id
+      WHERE mp.token = ? AND mp.is_bot = 0`,
+    ).get(token) as Omit<PilotProfile, 'handle' | 'firstSeen' | 'lastSeen' | 'classes'> | undefined;
+    if (!row || !row.matches) return null;
+    const who = this.db.prepare('SELECT handle, created_at, last_seen FROM players WHERE token = ?').get(token) as
+      { handle: string; created_at: number; last_seen: number } | undefined;
+    const classes = this.db.prepare(`
+      SELECT class_id AS classId, COUNT(*) AS matches, SUM(kills) AS kills
+      FROM match_players WHERE token = ? AND is_bot = 0
+      GROUP BY class_id ORDER BY matches DESC, kills DESC`,
+    ).all(token) as unknown[] as PilotProfile['classes'];
+    return { ...row, handle: who?.handle ?? '', firstSeen: who?.created_at ?? 0, lastSeen: who?.last_seen ?? 0, classes };
+  }
+
   recentMatches(limit = 20): unknown[] {
     return this.db.prepare(`
       SELECT m.id, m.room_id, m.arena, m.mode, m.ended_at, m.duration_s, m.winner, m.humans, m.bots,
@@ -137,18 +168,23 @@ export class MatchStore {
     return challenge;
   }
 
-  /** Daily leaderboard: everyone's mode score on a given day's challenge, best first. */
+  /**
+   * Daily leaderboard: each pilot's BEST run on a given day's challenge, best first — replaying can only
+   * improve your line, never fill the board. (SQLite returns the bare columns from the MAX(score) row.)
+   */
   dailyLeaderboard(date: string, limit = 50): unknown[] {
     const c = dailyChallenge(date);
     const from = Date.parse(date + 'T00:00:00Z');
     const to = from + 86400000;
     return this.db.prepare(`
-      SELECT COALESCE(p.handle, mp.name) AS handle, mp.score, mp.kills, mp.deaths, mp.oranges, mp.placement, m.ended_at, m.arena
+      SELECT COALESCE(p.handle, mp.name) AS handle, MAX(mp.score) AS score, mp.kills, mp.deaths, mp.oranges, mp.placement, m.ended_at, m.arena,
+             COUNT(*) AS runs
       FROM match_players mp
       JOIN matches m ON m.id = mp.match_id
       LEFT JOIN players p ON p.token = mp.token
       WHERE mp.is_bot = 0 AND m.mode = ? AND m.ended_at >= ? AND m.ended_at < ?
-      ORDER BY mp.score DESC, mp.placement ASC
+      GROUP BY COALESCE(mp.token, mp.name)
+      ORDER BY score DESC, mp.placement ASC
       LIMIT ?`,
     ).all(c.mode, from, to, limit);
   }

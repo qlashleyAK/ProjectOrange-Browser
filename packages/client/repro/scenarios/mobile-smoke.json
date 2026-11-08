@@ -1,0 +1,26 @@
+{
+  "name": "Phone: touch controls by default, fly with the stick, pause by tap",
+  "description": "Emulated Pixel 7 (landscape, touch, mobile UA): the game picks touch controls on its own, no pointer lock, the stick + boost + fire fly the ship, the ☰ button pauses and Resume brings the controls back.",
+  "device": "Pixel 7 landscape",
+  "settings": { "lastClass": "dart", "botSkill": "easy" },
+  "steps": [
+    { "do": "waitFor", "until": "p.menu === 'main'", "timeoutMs": 60000 },
+    { "do": "expect", "that": "p.controlScheme === 'touch' && document.body.classList.contains('touch-ui')", "label": "touch detected without any setting" },
+    { "do": "screenshot", "name": "menu" },
+    { "do": "click", "text": "Practice vs bots" },
+    { "do": "waitFor", "until": "p.mode === 'practice' && p.alive === true && p.phase === 'inProgress'", "timeoutMs": 60000 },
+    { "do": "waitFor", "until": "p.touchControls && p.inputEnabled", "timeoutMs": 10000 },
+    { "do": "expect", "that": "!p.pointerLocked", "label": "no pointer lock on touch" },
+    { "do": "mark", "as": "start" },
+    { "do": "touch", "points": [{ "at": [170, 260], "dy": -70 }, { "at": ".tc-boost" }, { "at": ".tc-fire", "dx": -40 }], "ms": 3000 },
+    { "do": "expect", "that": "dist(p.pos, m.start.pos) > 10", "label": "stick + boost fly the ship" },
+    { "do": "touch", "points": [{ "at": [170, 260], "dy": -70 }, { "at": ".tc-fire" }], "ms": 1200 },
+    { "do": "screenshot", "name": "flying" },
+    { "do": "touch", "points": [{ "at": ".tc-top .tc-btn" }], "ms": 120 },
+    { "do": "waitFor", "until": "p.menu === 'pause' && !p.touchControls", "timeoutMs": 10000 },
+    { "do": "screenshot", "name": "paused" },
+    { "do": "click", "text": "Resume" },
+    { "do": "waitFor", "until": "p.menu === null && p.touchControls", "timeoutMs": 10000 },
+    { "do": "noErrors" }
+  ]
+}

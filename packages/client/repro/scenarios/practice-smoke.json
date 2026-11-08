@@ -1,0 +1,91 @@
+{
+  "name": "Practice vs bots: boot, spawn, shoot, pause",
+  "description": "Smoke run of the offline loop: the menu loads, a practice match starts in the worker with bots backfilled, the HUD shows vitals, firing works, Esc pauses, and the console stays clean. CI runs this on every push.",
+  "settings": {
+    "arena": "hollowdeep",
+    "botSkill": "normal",
+    "lastClass": "dart"
+  },
+  "steps": [
+    {
+      "do": "waitFor",
+      "until": "p.menu === 'main'",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "screenshot",
+      "name": "main-menu"
+    },
+    {
+      "do": "click",
+      "text": "Practice vs bots"
+    },
+    {
+      "do": "waitFor",
+      "until": "p.mode === 'practice' && p.alive === true",
+      "timeoutMs": 60000
+    },
+    {
+      "do": "expect",
+      "that": "p.ships >= 6 && p.humans === 1",
+      "label": "bots backfill the room"
+    },
+    {
+      "do": "expect",
+      "that": "p.controlScheme === 'kbm' && !p.touchControls",
+      "label": "desktop stays on keyboard + mouse"
+    },
+    {
+      "do": "expect",
+      "that": "p.classId === 'dart' && p.hull > 0",
+      "label": "spawns as the remembered class with vitals"
+    },
+    {
+      "do": "focus"
+    },
+    {
+      "do": "waitFor",
+      "until": "p.phase === 'inProgress'",
+      "timeoutMs": 30000
+    },
+    {
+      "do": "look",
+      "dx": 240,
+      "dy": -60,
+      "ms": 600
+    },
+    {
+      "do": "fire",
+      "ms": 800
+    },
+    {
+      "do": "screenshot",
+      "name": "in-match"
+    },
+    {
+      "do": "press",
+      "key": "Escape"
+    },
+    {
+      "do": "waitFor",
+      "until": "p.menu === 'pause' && p.paused",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "screenshot",
+      "name": "paused"
+    },
+    {
+      "do": "click",
+      "text": "Leave match"
+    },
+    {
+      "do": "waitFor",
+      "until": "p.menu === 'main' && p.mode === 'menu'",
+      "timeoutMs": 10000
+    },
+    {
+      "do": "noErrors"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  arenaById, BULWARK_ABSORB, CLASS_LIST, initPhysics, lineOfSight, placeAt,
+  arenaById, BUILD_VERSION, BULWARK_ABSORB, CLASS_LIST, initPhysics, lineOfSight, placeAt,
   type ArenaData, type ClassId, type GameEvent, type Theme,
 } from '@orange/shared';
 import './style.css';
@@ -9,21 +9,24 @@ import { audio } from './audio/audio';
 import { Presenter } from './game/presenter';
 import { Hud } from './hud/hud';
 import { InputManager } from './input/input';
+import { TouchControls } from './input/touch';
 import { OfflineSource } from './modes/offline';
 import { OnlineSource, type NetStatus } from './modes/online';
+import { presenceTabId, serverApi } from './net/api';
 import { WorkerTransport, WsTransport } from './net/transport';
 import { CameraRig } from './render/camera';
 import { Effects } from './render/effects';
 import { LightRig } from './render/lights';
+import { CheckpointRenderer } from './render/checkpoints';
 import { PowerupRenderer } from './render/powerups';
 import { MissileRenderer, PickupRenderer, ProjectileRenderer } from './render/projectiles';
 import { Renderer } from './render/renderer';
 import { ShipRenderer } from './render/ships';
-import { onSettings, saveSettings, settings, type Quality } from './settings';
+import { onSettings, saveSettings, settings, touchMode, type Quality } from './settings';
 import { Menu } from './ui/menu';
 import type { ShipView, ViewSource } from './view';
 
-type SessionKind = 'quick' | 'private' | 'practice';
+type SessionKind = 'quick' | 'private' | 'practice' | 'daily';
 interface Session { source: ViewSource; kind: SessionKind; room: string | null; origin: string }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -58,12 +61,12 @@ async function pingRegions(): Promise<RegionInfo | null> {
   return results[0] ?? null;
 }
 
-/** `arena` only matters if the server has to create the room; existing rooms keep their map. */
-function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string): string {
+/** `arena` only matters if the server has to create the room; existing rooms keep their map. `daily` joins today's challenge room. */
+function wsUrl(origin: string, room: string | null, isPrivate: boolean, arena: string, daily = false): string {
   const u = new URL(origin);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   u.pathname = '/ws';
-  u.search = `?room=${encodeURIComponent(room)}${isPrivate ? '&private=1' : ''}&arena=${encodeURIComponent(arena)}`;
+  u.search = daily ? '?daily=1' : `?room=${encodeURIComponent(room ?? '')}${isPrivate ? '&private=1' : ''}&arena=${encodeURIComponent(arena)}`;
   return u.toString();
 }
 
@@ -89,6 +92,19 @@ async function boot(): Promise<void> {
   const hud = new Hud(hudEl);
   hud.setVisible(false);
   const menu = new Menu(hudEl);
+  const touch = new TouchControls(hudEl, input, { menu: () => openPause(), scoreboard: (on) => { hud.showScoreboard = on; } });
+  const applyControlScheme = () => document.body.classList.toggle('touch-ui', touchMode());
+  applyControlScheme();
+  onSettings(applyControlScheme);
+  /** phones: a match runs fullscreen and landscape where the browser allows it (needs the tap that started it) */
+  const mobileFullscreen = () => {
+    if (!touchMode() || document.fullscreenElement) return;
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    const p = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? (el.webkitRequestFullscreen?.(), undefined);
+    void Promise.resolve(p)
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> })?.lock?.('landscape'))
+      .catch(() => { /* not allowed here (iOS Safari): the rotate hint covers it */ });
+  };
   const regionPing = pingRegions();
 
   await physics;
@@ -120,6 +136,7 @@ async function boot(): Promise<void> {
   const missileR = new MissileRenderer(renderer.scene, effects);
   const pickupR = new PickupRenderer(renderer.scene);
   const powerupR = new PowerupRenderer(renderer.scene, effects);
+  const checkpointR = new CheckpointRenderer(renderer.scene);
   const camRig = new CameraRig(renderer.camera);
   const presenter = new Presenter(effects, shipR, camRig, renderer.camera);
   console.info(`arena ready in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -175,15 +192,17 @@ async function boot(): Promise<void> {
   };
 
   // ---------------------------------------------------------------- menus
-  const inviteLink = () => (session && session.kind !== 'practice' && session.room ? `${location.origin}${location.pathname}?room=${session.room}` : null);
+  const inviteLink = () => (session && (session.kind === 'quick' || session.kind === 'private') && session.room ? `${location.origin}${location.pathname}?room=${session.room}` : null);
 
   const showMain = () => {
     menu.showMain({
       quickPlay: () => void startOnline('quick', null),
+      daily: () => void startOnline('daily', null),
       practice: () => startPractice(),
       createPrivate: () => void startOnline('private', randomCode()),
       joinPrivate: (code) => void startOnline('private', code),
       mapChanged: (id) => useArena(arenaById(id)),
+      api: () => (bestRegion ? serverApi(bestRegion.origin) : null),
     }, urlRoom);
     audio.startMusic('menu');
   };
@@ -234,7 +253,7 @@ async function boot(): Promise<void> {
       if (kind === 'practice') { console.warn('offline worker failed, falling back to main thread', detail); endSession(false); startPractice(true); return; }
       endSession(false);
       menu.showMessage('Disconnected', detail ?? 'The connection to the server was lost.', [
-        { label: 'Reconnect', fn: () => void startOnline(kind === 'private' ? 'private' : 'quick', room) }, { label: 'Back to menu', fn: showMain },
+        { label: 'Reconnect', fn: () => void startOnline(kind === 'private' || kind === 'daily' ? kind : 'quick', room) }, { label: 'Back to menu', fn: showMain },
       ]);
     }
   };
@@ -250,10 +269,11 @@ async function boot(): Promise<void> {
     if (settings.firstVisit) { settings.firstVisit = false; saveSettings(); }
   };
 
-  const startOnline = async (kind: 'quick' | 'private', room: string | null) => {
+  const startOnline = async (kind: 'quick' | 'private' | 'daily', room: string | null) => {
     audio.unlock();
+    mobileFullscreen();
     connecting = true;
-    menu.showMessage('Connecting…', kind === 'private' ? `Room ${room}` : 'Finding a match', [{ label: 'Cancel', fn: () => { endSession(); } }]);
+    menu.showMessage('Connecting…', kind === 'private' ? `Room ${room}` : kind === 'daily' ? "Today's daily challenge" : 'Finding a match', [{ label: 'Cancel', fn: () => { endSession(); } }]);
     const region = bestRegion ?? { origin: location.origin, name: 'local', ping: 0 };
     let code = room;
     if (kind === 'quick') {
@@ -272,7 +292,7 @@ async function boot(): Promise<void> {
     if (kind === 'private' && code) history.replaceState(null, '', `${location.pathname}?room=${code}`);
     const cls = settings.firstVisit ? 'dart' : settings.lastClass;
     const src = new OnlineSource(arena, input, settings.name || 'Pilot', cls, {
-      makeTransport: () => new WsTransport(wsUrl(region.origin, code!, kind === 'private', settings.arena)),
+      makeTransport: () => new WsTransport(wsUrl(region.origin, code, kind === 'private', settings.arena, kind === 'daily')),
       offline: false,
       token: settings.token || undefined,
       onToken: (t) => { settings.token = t; saveSettings(); },
@@ -284,6 +304,7 @@ async function boot(): Promise<void> {
 
   const startPractice = (mainThread = false) => {
     audio.unlock();
+    mobileFullscreen();
     const cls: ClassId = settings.firstVisit ? 'dart' : settings.lastClass;
     const map = arenaById(settings.arena);
     let src: ViewSource;
@@ -312,6 +333,7 @@ async function boot(): Promise<void> {
     projR.update([]);
     missileR.update([], 0, renderer.camera);
     pickupR.update([], 0, renderer.camera);
+    checkpointR.clear();
     effects.clear();
     audio.stopAllLoops();
     audio.engine(null);
@@ -374,6 +396,8 @@ async function boot(): Promise<void> {
     }
   });
   window.addEventListener('keydown', () => audio.unlock(), { once: true });
+  // a stray Ctrl+W / Cmd+W mid-match gets the browser's "Leave site?" prompt instead of closing the tab
+  window.addEventListener('beforeunload', (e) => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('pointerdown', () => audio.unlock(), { once: true });
 
   document.addEventListener('visibilitychange', () => {
@@ -394,6 +418,7 @@ async function boot(): Promise<void> {
     fpsAvg += (1 / Math.max(dt, 1e-3) - fpsAvg) * 0.05;
     const s = session;
 
+    touch.setVisible(!!s && !menu.isOpen && touchMode());
     if (!s) {
       // menu backdrop: a slow drift through the hub (or the first room of other maps)
       const t = nowMs / 1000 * 0.05;
@@ -444,6 +469,8 @@ async function boot(): Promise<void> {
       fov = camRig.deathCam(dt, deathPos, killer ? vC.set(killer.pos.x, killer.pos.y, killer.pos.z) : null, time - deathAt);
     }
     wasAlive = !!L?.alive;
+    touch.setFlying(!!L?.alive && src.match().phase !== 'postMatch');
+    if (touch.visible && L) touch.setReady(L.abilityCooldown <= 0 && L.abilityActive <= 0, L.tier.repel && L.repelCooldown <= 0);
     renderer.setHorizontalFov(fov);
     const camPos = renderer.camera.position;
 
@@ -470,6 +497,9 @@ async function boot(): Promise<void> {
     missileR.update(missiles, dt, renderer.camera);
     pickupR.update(src.pickups(), time, renderer.camera);
     powerupR.update(src.powerup(), time, dt);
+    const mv = src.match();
+    const myCheckpoint = roster.find((r) => r.id === localId)?.checkpoint ?? 0;
+    checkpointR.update(mv.mode === 'mine-run' && mv.phase === 'inProgress' ? mv.course : [], myCheckpoint, time);
     const extra: typeof effects.lightRequests = [];
     shipR.auraLights(extra);
     const placeId = arenaView.updateVisibility(camPos);
@@ -525,13 +555,55 @@ async function boot(): Promise<void> {
     renderer.render(dt);
   };
 
+  // presence: "N pilots online · M in matches" on the menu, refreshed while it's up
+  const tabId = presenceTabId();
+  const pollPresence = () => {
+    if (session || !bestRegion || document.hidden) return;
+    serverApi(bestRegion.origin).presence(tabId).then((c) => {
+      menu.setPresence(`${c.online} ${c.online === 1 ? 'pilot' : 'pilots'} online · ${c.inMatch} in matches`);
+    }).catch(() => menu.setPresence(null));
+  };
+  setInterval(pollPresence, 20_000);
+
   void regionPing.then((r) => {
     bestRegion = r;
     menu.regionText = r ? `Region ${r.name} · ${Math.round(r.ping)} ms` : 'No server found — Practice works offline';
-    if (!session && menu.isOpen && !connecting) showMain();
+    if (!session && menu.isOpen && !connecting && menu.screen === 'main') showMain();
+    pollPresence();
   });
 
-  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings };
+  /**
+   * JSON-safe state snapshot for the headless repro harness (packages/client/repro) and for bug reports.
+   * Scenario files read these fields by name: extend the shape, don't rename fields.
+   */
+  const stateProbe = () => {
+    const src = session?.source ?? null;
+    const L = src?.local() ?? null;
+    const m = src?.match() ?? null;
+    const roster = src?.roster() ?? [];
+    const me = L ? roster.find((r) => r.id === L.shipId) : undefined;
+    const v = src?.ships().find((s) => s.isLocal);
+    const net = src?.netStats() ?? null;
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    return {
+      version: BUILD_VERSION, buildTime: __BUILD_TIME__,
+      mode: session ? session.kind : 'menu', online: src?.online ?? false, connecting, paused,
+      menu: menu.screen, arena: arena.blueprint.id, fps: Math.round(fpsAvg), quality: renderer.quality,
+      pointerLocked: input.pointerLocked, inputEnabled: input.enabled, touchControls: touch.visible,
+      controlScheme: touchMode() ? 'touch' : 'kbm',
+      ping: net ? Math.round(net.ping) : null, corrections: net ? r1(net.corrections) : null,
+      phase: m?.phase ?? null, timeLeft: m ? Math.round(m.timeLeft) : null,
+      alive: L?.alive ?? null, classId: L ? L.def.id : null, hull: L ? r1(L.hull) : null, shield: L ? r1(L.shield) : null,
+      power: L?.power ?? null, tier: L?.tier.index ?? null,
+      pos: v ? { x: r1(v.pos.x), y: r1(v.pos.y), z: r1(v.pos.z) } : null,
+      speed: v ? r1(Math.hypot(v.vel.x, v.vel.y, v.vel.z)) : null,
+      kills: me?.kills ?? null, deaths: me?.deaths ?? null,
+      gameMode: m?.mode ?? null, wave: m?.wave ?? null, score: me?.score ?? null, checkpoint: me?.checkpoint ?? null,
+      courseLength: m?.course.length ?? null,
+      ships: roster.length, bots: roster.filter((r) => r.isBot).length, humans: roster.filter((r) => !r.isBot).length,
+    };
+  };
+  (window as unknown as { orange: unknown }).orange = { get session() { return session; }, renderer, settings, probe: stateProbe };
 
   bootEl.classList.add('gone');
   setTimeout(() => bootEl.remove(), 600);

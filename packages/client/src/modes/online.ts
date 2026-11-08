@@ -2,7 +2,7 @@ import {
   BUILD_VERSION, castStatic, CLASS_LIST, classByIndex, DT, encodeInputPacket, encodePing, END_REASONS, INPUT_SEND_HZ,
   INPUT_BUFFER_TARGET_MAX, MAX_INPUTS_PER_PACKET, MsgType, PRIMARY_TABLE, quantizeInput, Reader, decodeSnapshot, resolveTier,
   RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, safeZoneAt, ShipFlag, TIME_DILATION, activePrimary, powerupFromFlags, v3, q4,
-  type ArenaData, type ClassId, type ClientMsg, type GameEvent, type InputCmd, type MatchPhase, type OwnerSnap, type PickupInfo,
+  type ArenaData, type ClassId, type ClientMsg, type GameEvent, type GameMode, type InputCmd, type MatchPhase, type OwnerSnap, type PickupInfo,
   type PowerupInfo, type PrimaryDef, type Q4, type RAPIER, type RosterEntry, type ServerMsg, type ShipSnap, type Snapshot, type V3,
 } from '@orange/shared';
 import { ClockSync } from '../net/clock';
@@ -39,6 +39,9 @@ export interface OnlineOptions {
   /** map id from the welcome → arena; without it the client stays on the arena it was built with */
   resolveArena?: (id: string) => ArenaData;
 }
+
+/** Mirrors GameSim.weaponsEnabled: weapons are live in a match (except the mine-run time trial) and while waiting. */
+const weaponsLive = (phase: MatchPhase, mode: GameMode) => (phase === 'inProgress' && mode !== 'mine-run') || phase === 'waiting';
 
 /** Networked view: predicted local ship, interpolated remote entities, delayed positional events. */
 export class OnlineSource implements ViewSource {
@@ -79,6 +82,9 @@ export class OnlineSource implements ViewSource {
   private rosterList: RosterEntry[] = [];
   private matchState = { phase: 'waiting' as MatchPhase, phaseEndTick: 0, winnerId: -1, startTick: 0 };
   private nextArena: string | null = null;
+  private mode: GameMode = 'ffa';
+  private wave = 0;
+  private course: V3[] = [];
   private owner: OwnerSnap | null = null;
   private ownerTick = 0;
   private deathTick = -1;
@@ -181,7 +187,8 @@ export class OnlineSource implements ViewSource {
         this.nextArena = m.nextArena ?? null;
         if (m.phase === 'inProgress' && this.matchState.phase !== 'inProgress') this.matchState.startTick = m.tick;
         this.matchState.phase = m.phase; this.matchState.phaseEndTick = m.phaseEndTick; this.matchState.winnerId = m.winnerId;
-        this.predictor.weaponsEnabled = m.phase === 'inProgress' || m.phase === 'waiting';
+        this.mode = m.mode ?? 'ffa'; this.wave = m.wave ?? 0; this.course = m.course ?? [];
+        this.predictor.weaponsEnabled = weaponsLive(m.phase, this.mode);
         break;
       }
       case 'pickups':
@@ -240,9 +247,10 @@ export class OnlineSource implements ViewSource {
       case 'phase':
         if (e.phase === 'inProgress') this.matchState.startTick = tick;
         this.matchState.phase = e.phase;
-        this.predictor.weaponsEnabled = e.phase === 'inProgress' || e.phase === 'waiting';
+        this.predictor.weaponsEnabled = weaponsLive(e.phase, this.mode);
         break;
       case 'matchEnd': this.matchState.winnerId = e.winnerId; break;
+      case 'wave': this.wave = e.wave; break;
     }
     this.out.push(e);
   }
@@ -586,7 +594,7 @@ export class OnlineSource implements ViewSource {
     return {
       phase: m.phase, timeLeft: Math.max(0, (m.phaseEndTick - this.serverNow) * DT), winnerId: m.winnerId,
       elapsed: m.phase === 'inProgress' ? Math.max(0, (this.serverNow - m.startTick) * DT) : 0,
-      nextArena: this.nextArena,
+      nextArena: this.nextArena, mode: this.mode, wave: this.wave, course: this.course,
     };
   }
 

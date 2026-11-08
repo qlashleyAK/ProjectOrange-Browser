@@ -1,0 +1,16 @@
+{
+  "name": "Practice vs bots: thrust and boost move the ship",
+  "description": "Flight check: holding W + Shift carries the ship well away from where it stood. Timing-sensitive — reliable on a GPU or a fast machine; on 4-core software GL the worker can be starved (see repro/README.md).",
+  "settings": { "arena": "hollowdeep", "botSkill": "easy", "lastClass": "dart" },
+  "steps": [
+    { "do": "waitFor", "until": "p.menu === 'main'", "timeoutMs": 60000 },
+    { "do": "click", "text": "Practice vs bots" },
+    { "do": "waitFor", "until": "p.mode === 'practice' && p.alive === true && p.phase === 'inProgress'", "timeoutMs": 60000 },
+    { "do": "focus" },
+    { "do": "mark", "as": "start" },
+    { "do": "hold", "keys": ["KeyW", "ShiftLeft"], "ms": 2000 },
+    { "do": "expect", "that": "dist(p.pos, m.start.pos) > 15", "label": "ship flies under thrust + boost" },
+    { "do": "screenshot", "name": "after-boost" },
+    { "do": "noErrors" }
+  ]
+}

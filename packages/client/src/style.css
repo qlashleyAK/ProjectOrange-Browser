@@ -186,3 +186,85 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   .pw-timer { bottom: 190px; }
   .pips i { width: 11px; height: 11px; }
 }
+
+/* main menu shell */
+.btn:focus-visible { outline: 2px solid #5affdc; outline-offset: 1px; background: #1f2e3e; }
+.tabs button:focus-visible { outline: 2px solid #5affdc; outline-offset: 1px; }
+.panel .presence { color: var(--teal); font-size: 12px; letter-spacing: 1px; margin: -8px 0 12px; }
+.panel .presence::before { content: '●'; margin-right: 6px; }
+.panel .presence.hidden { display: none; }
+.panel .menu-hint { font-size: 11px; margin: 10px 0 0; }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; text-align: center; }
+.panel .daily { font-size: 12px; margin: 10px 0 0; }
+.panel .board { min-height: 120px; max-height: 50vh; overflow: auto; }
+.panel .board table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.panel .board th { color: var(--dim); font-weight: 400; text-align: right; padding: 4px 6px; border-bottom: 1px solid #2b3d50; }
+.panel .board td { text-align: right; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.05); font-variant-numeric: tabular-nums; }
+.panel .board th:nth-child(2), .panel .board td:nth-child(2) { text-align: left; }
+.panel .board tr.me td { color: #5affdc; }
+.panel .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.panel .stats div { background: #0e151e; border: 1px solid #2b3d50; padding: 8px 10px; }
+.panel .stats b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.panel .stats span { color: var(--dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.panel .ranks { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 4px 0 14px; font-size: 12px; }
+.panel .ranks span { background: #0e151e; border: 1px solid #2b3d50; padding: 3px 7px; }
+.panel .ranks i { color: var(--dim); font-style: normal; }
+
+/* daily challenge */
+.cp-marker, .cp-arrow { color: #5affdc; }
+.postmatch .daily-result { color: #5affdc; }
+
+/* touch controls (phones / tablets) */
+canvas#game { touch-action: none; }
+.touch { position: fixed; inset: 0; z-index: 6; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.touch.hidden { display: none; }
+.touch .tc-look { position: absolute; right: 0; top: 0; bottom: 0; width: 55%; pointer-events: auto; touch-action: none; }
+.touch .tc-stick-zone { position: absolute; left: 0; top: 22%; bottom: 0; width: 45%; pointer-events: auto; touch-action: none; }
+.touch.dead .tc-look, .touch.dead .tc-stick-zone, .touch.dead .tc-buttons, .touch.dead .tc-climb, .touch.dead .tc-stick { display: none; }
+.tc-stick { position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(90,255,220,.35); background: rgba(90,255,220,.06); pointer-events: none; }
+.tc-stick.hidden { display: none; }
+.tc-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px; border-radius: 50%; background: rgba(90,255,220,.35); }
+.tc-btn { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); background: rgba(10,16,24,.45);
+  color: var(--text); font: 700 10px/1 system-ui, sans-serif; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; }
+.tc-btn.on { background: rgba(90,255,220,.28); border-color: #5affdc; }
+.tc-buttons { position: absolute; right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); width: 280px; height: 280px; pointer-events: none; }
+.tc-fire { right: 26px; bottom: 26px; width: 94px; height: 94px; font-size: 14px; border-color: rgba(90,255,220,.6); }
+.tc-missile { right: 134px; bottom: 20px; width: 64px; height: 64px; }
+.tc-boost { right: 128px; bottom: 96px; width: 60px; height: 60px; }
+.tc-dodge { right: 50px; bottom: 132px; width: 58px; height: 58px; }
+.tc-brake { right: 208px; bottom: 26px; width: 52px; height: 52px; }
+.tc-ability { right: 12px; bottom: 198px; width: 54px; height: 54px; font-size: 9px; }
+.tc-repel { right: 78px; bottom: 204px; width: 52px; height: 52px; font-size: 9px; }
+.tc-climb { position: absolute; left: calc(14px + env(safe-area-inset-left, 0px)); top: 26%; display: flex; flex-direction: column; gap: 10px; }
+.tc-climb-btn { position: static; width: 56px; height: 56px; }
+.tc-top { position: absolute; top: 8px; right: calc(10px + env(safe-area-inset-right, 0px)); display: flex; gap: 8px; }
+.tc-small { position: static; width: 42px; height: 42px; border-radius: 10px; font-size: 20px; }
+.rotate-hint { display: none; position: fixed; inset: 0; z-index: 30; background: rgba(2,3,6,.94); flex-direction: column; align-items: center; justify-content: center; gap: 8px; pointer-events: auto; text-align: center; }
+.rotate-hint div { font-size: 54px; color: var(--teal); }
+.rotate-hint span { color: var(--dim); }
+@media (orientation: portrait) { .touch .rotate-hint { display: flex; } }
+
+/* touch layout: keyboard-only hints off, HUD weapon block lifted clear of the button cluster, menus fit phones */
+.touch-ui .menu-hint { display: none; }
+.panel { max-width: calc(100vw - 16px); }
+@media (max-height: 500px) { .panel { padding: 14px 18px; } .panel h1 { font-size: 24px; } .btn { padding: 8px 12px; margin: 6px 0; } }
+.touch-ui .weapons { top: calc(58px + env(safe-area-inset-top, 0px)); bottom: auto; right: calc(12px + env(safe-area-inset-right, 0px)); width: 210px; transform: scale(.85); transform-origin: top right; }
+.touch-ui .assist, .touch-ui .icons .key { display: none; }
+.touch-ui .vitals { left: calc(16px + env(safe-area-inset-left, 0px)); bottom: 14px; width: 220px; }
+.touch-ui .power { bottom: 10px; }
+@media (max-height: 500px) {
+  .panel .fields { display: flex; gap: 10px; }
+  .panel .fields .row { flex: 1; margin: 4px 0; }
+  .panel .fields .row label { display: none; }
+  .panel .map-blurb, .panel .btn small, .panel h1 + .sub { display: none; }
+  .panel .presence { margin: 0 0 6px; }
+  .panel .btn { padding: 7px 12px; margin: 5px 0; }
+}
+.touch-ui .weapons .icons { display: none; }
+.touch-ui .killfeed { top: calc(150px + env(safe-area-inset-top, 0px)); right: 300px; width: 300px; }
+.tc-btn.cool { opacity: .38; }
+@media (max-height: 500px) {
+  .panel .main-btns { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; }
+  .panel h1 { font-size: 22px; margin-bottom: 2px; }
+}

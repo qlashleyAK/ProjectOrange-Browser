@@ -36,6 +36,8 @@ pnpm dev          # client at the printed URL (offline vs bots works with no ser
 pnpm dev:server   # optional: local room server for multiplayer
 pnpm test         # unit tests
 pnpm soak         # sim soak: headless rooms-per-process measurement
+pnpm balance brute hull=220   # paired bot-vs-bot A/B sims of a tuning change
+pnpm repro practice-smoke     # headless Chromium plays a scripted client scenario
 ```
 
 Requires a recent Node LTS. The client is desktop Chrome/Edge/Firefox/Safari
@@ -54,7 +56,10 @@ the launch.
 Issues, bug reports, and **balance requests** are welcome — balance requests
 should cite numbers (your ship, the matchup, what happened vs. what you
 expected). Good balance claims get replayed through the headless bot-vs-bot
-sim before anyone argues about them. Issue templates are in `.github/` (as the
+sim before anyone argues about them: `/balance brute hull=220` on an issue posts
+the paired A/B table ([how it works](docs/balance-bot.md)), and `pnpm balance`
+runs the same thing locally. Client bugs with repro steps can be replayed
+headlessly with `pnpm repro` ([scenarios](packages/client/repro/README.md)). Issue templates are in `.github/` (as the
 public factory comes online). The repo's task board is
 [Dolt-backed](.beads/README.md) — `bd bootstrap` after cloning to see open work.
 

@@ -1,0 +1,62 @@
+name: Balance sim
+
+# `/balance <ship> <change>...` as the first line of an issue or PR comment → paired bot-vs-bot A/B sims
+# (current tuning vs proposed) → the per-ship table posted as a reply. See docs/balance-bot.md.
+#
+# Security — issue_comment runs with a write token, so:
+#   * the job only ever runs the DEFAULT BRANCH's code (checkout without a ref; never the PR head);
+#   * the comment reaches the CLI through an env var, never interpolated into a shell line, and the CLI
+#     whitelists it token by token (ship name, stat=number changes, three flags; ≤ 16 matches);
+#   * only owners, members and collaborators can trigger it, so strangers can't spend runner minutes.
+#     Widen the author_association list when the factory goes public.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: balance-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  balance:
+    if: >-
+      startsWith(github.event.comment.body, '/balance') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Acknowledge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" -f content=eyes
+      - name: Run paired sims
+        id: sim
+        env:
+          BALANCE_COMMENT: ${{ github.event.comment.body }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          pnpm --silent balance --from-env BALANCE_COMMENT --out balance-report.md
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          if [ ! -s balance-report.md ]; then
+            printf '### ⚖️ Balance sim — failed\n\nThe sim crashed before writing a report; see the [run log](%s).\n' "$RUN_URL" > balance-report.md
+          fi
+      - name: Post the table
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body-file balance-report.md
+      - name: Fail on a crash (a bad request is answered, not failed)
+        if: steps.sim.outputs.exit != '0' && steps.sim.outputs.exit != '2'
+        run: exit 1

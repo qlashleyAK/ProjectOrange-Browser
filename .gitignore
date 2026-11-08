@@ -11,3 +11,4 @@ data/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+repro-out/

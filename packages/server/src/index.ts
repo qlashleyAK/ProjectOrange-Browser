@@ -3,8 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { ARENAS, arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, todayChallenge, type ClientLink, type MatchReport } from '@orange/shared';
+import {
+  ARENAS, arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, isIdentityToken, todayChallenge,
+  type ClientLink, type MatchReport,
+} from '@orange/shared';
 import { MatchStore, openDb } from './db.js';
+import { Presence } from './presence.js';
 import { RankedQueue, migrateRanked } from './ranked.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
@@ -17,6 +21,7 @@ const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '../../client/di
 
 const rooms = new Map<string, GameRoom>();
 let roomCounter = 0;
+const presence = new Presence();
 
 const store = DB_PATH === 'none' ? null : new MatchStore(openDb(DB_PATH));
 if (store) migrateRanked((store as unknown as { db: import('node:sqlite').DatabaseSync }).db);
@@ -93,6 +98,22 @@ function quickplayRoom(arena = DEFAULT_ROOM_ARENA): GameRoom {
   return best ?? getRoom(`PUB${(++roomCounter).toString(36).toUpperCase()}`, false, arena);
 }
 
+function json(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+/** Small request bodies only (a token); anything bigger is dropped. */
+function readBody(req: IncomingMessage, max = 256): Promise<string | null> {
+  return new Promise((ok) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (d: string) => { body += d; if (body.length > max) { ok(null); req.destroy(); } });
+    req.on('end', () => ok(body));
+    req.on('error', () => ok(null));
+  });
+}
+
 function sanitizeCode(code: string): string { return code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12); }
 
 const MIME: Record<string, string> = {
@@ -149,6 +170,22 @@ async function main(): Promise<void> {
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') ?? 20)));
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ matches: store.recentMatches(limit) }));
+      return;
+    }
+    if (url.pathname === '/api/presence') {
+      presence.touch(url.searchParams.get('id'), Date.now());
+      let inMatch = 0;
+      for (const r of rooms.values()) inMatch += r.connectedHumans;
+      json(res, 200, { ...presence.counts(inMatch, Date.now()), rooms: rooms.size });
+      return;
+    }
+    // POST with a text/plain body: the token never lands in a URL or log, and stays a CORS "simple" request
+    if (store && url.pathname === '/api/profile' && req.method === 'POST') {
+      void readBody(req).then((body) => {
+        const token = body?.trim();
+        if (!isIdentityToken(token)) { json(res, 400, { error: 'bad token' }); return; }
+        json(res, 200, { profile: store.profile(token) });
+      });
       return;
     }
     if (store && url.pathname === '/api/daily') {

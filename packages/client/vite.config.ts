@@ -23,6 +23,7 @@ export default defineConfig({
       '/ws': { target: server.replace(/^http/, 'ws'), ws: true },
       '/quickplay': server,
       '/ping': server,
+      '/api': server,
     },
   },
   define: {

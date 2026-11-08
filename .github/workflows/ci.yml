@@ -26,3 +26,32 @@ jobs:
           path: |
             packages/client/dist
             packages/server/dist
+
+  # Boots the built client in headless Chromium and plays the smoke scenarios: the offline loop
+  # (menu → practice vs bots → HUD → fire → pause → leave) and every main-menu screen, clean console.
+  client-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install headless Chromium
+        run: pnpm --filter @orange/client exec playwright-core install --with-deps chromium
+      - run: pnpm --filter @orange/client build
+      - name: Repro harness — practice smoke
+        run: pnpm repro practice-smoke --out repro-out/practice-smoke
+      - name: Repro harness — menu shell
+        if: always()
+        run: pnpm repro menu-shell --out repro-out/menu-shell
+      - name: Repro harness — phone (touch controls)
+        if: always()
+        run: pnpm repro mobile-smoke --out repro-out/mobile-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repro-smoke
+          path: repro-out

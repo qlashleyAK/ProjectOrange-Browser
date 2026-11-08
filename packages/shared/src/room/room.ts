@@ -8,6 +8,7 @@ import { cloakVisible } from '../bots/perception.js';
 import type { BotSkill } from '../bots/brain.js';
 import type { GameEvent, GameMode, Ship } from '../entities.js';
 import { GameSim } from '../game.js';
+import { modeScore } from '../match.js';
 import { InputFlag, neutralInput, seqDiff, type InputCmd } from '../input.js';
 import {
   decodeInputPacket, encodePong, encodeSnapshot, END_REASONS, MsgType, primaryIndex, Reader, ShipFlag, Writer,
@@ -64,7 +65,12 @@ export interface RoomOptions {
   log?: (msg: string) => void;
 }
 
-const REPEAT_CLEAR = InputFlag.Primary | InputFlag.Ability | InputFlag.Repel | InputFlag.DodgeL | InputFlag.DodgeR | InputFlag.DodgeU | InputFlag.DodgeD;
+/** Anonymous identity tokens are minted by rooms as base36; accept that shape back from clients and nothing else. */
+export function isIdentityToken(t: unknown): t is string {
+  return typeof t === 'string' && /^[a-z0-9]{8,32}$/.test(t);
+}
+
+const REPEAT_CLEAR =InputFlag.Primary | InputFlag.Ability | InputFlag.Repel | InputFlag.DodgeL | InputFlag.DodgeR | InputFlag.DodgeU | InputFlag.DodgeD;
 /** events never sent over JSON (they travel in the binary snapshot) */
 const BINARY_EVENTS = new Set(['projSpawn', 'projEnd', 'shot']);
 
@@ -114,6 +120,8 @@ export class GameRoom {
 
   // ------------------------------------------------------------------ occupancy
   get humans(): number { return this.sim.shipList.filter((s) => !s.isBot).length; }
+  /** humans with a live connection (excludes slots held for a reconnect) — the presence counter's "in matches" */
+  get connectedHumans(): number { return this.sim.shipList.filter((s) => !s.isBot && s.connected).length; }
   get participants(): number { return this.sim.shipList.filter((s) => !s.removeAtDeath).length; }
   private maxHumans = MAX_PARTICIPANTS;
   get hasFreeSlot(): boolean { return this.humans < this.maxHumans; }
@@ -192,7 +200,11 @@ export class GameRoom {
         } else {
           if (!this.hasFreeSlot) { this.sendJson(c, { t: 'full' }); c.link.close(); return; }
           this.makeRoomForHuman();
-          c.token = `${hash32(this.sim.tick, this.now() | 0, Math.random() * 1e9).toString(36)}${hash32(Math.random() * 1e9).toString(36)}`;
+          // the token is the pilot's identity across rooms and visits (stats, profile): keep the one the client
+          // brings, unless it's malformed or already flying in this room (a second tab gets its own)
+          c.token = isIdentityToken(m.token) && !prev
+            ? m.token
+            : `${hash32(this.sim.tick, this.now() | 0, Math.random() * 1e9).toString(36).padStart(7, '0')}${hash32(Math.random() * 1e9).toString(36).padStart(7, '0')}`;
           c.playerId = `p:${c.token.slice(0, 8)}`;
           const ship = this.sim.addPlayer(c.playerId, name, cls);
           c.shipId = ship.id;
@@ -349,7 +361,7 @@ export class GameRoom {
       kills: s.stats.kills, deaths: s.stats.deaths, assists: s.stats.assists, power: s.power, ping: s.isBot ? 0 : pingOf(s),
       alive: s.alive, connected: s.connected, damage: Math.round(s.stats.damageDealt), shotsFired: s.stats.shotsFired,
       shotsHit: s.stats.shotsHit, oranges: s.stats.orangesCollected, peakPower: s.stats.peakPower, tier: s.tier.index,
-      maxShield: s.maxShield,
+      maxShield: s.maxShield, score: modeScore(s, this.sim.mode, this.sim), checkpoint: s.checkpoint,
     }));
   }
 
@@ -364,6 +376,8 @@ export class GameRoom {
     return {
       t: 'match', phase: m.phase, phaseEndTick: m.phaseEndTick, winnerId: m.winnerId, tick: this.sim.tick,
       arena: this.sim.arena.blueprint.id, nextArena: this.sim.upcomingArena().blueprint.id,
+      mode: this.sim.mode, wave: this.sim.wave,
+      course: this.sim.course.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, z: Math.round(p.z * 10) / 10 })),
     };
   }
   private broadcastMatch(): void {
