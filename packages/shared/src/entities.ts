@@ -157,4 +157,4 @@ export type GameEvent =
 
 export type MatchPhase = 'waiting' | 'warmup' | 'inProgress' | 'postMatch';
 /** match modes: classic FFA plus the rotating daily challenge modes (shared/src/daily.ts) */
-export type GameMode = 'ffa' | 'score-attack' | 'survival' | 'mine-run';
+export type GameMode = 'ffa' | 'score-attack' | 'survival' | 'mine-run' | 'ranked-duel';

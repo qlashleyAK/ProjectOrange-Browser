@@ -73,7 +73,7 @@ export function openDb(path: string): DatabaseSync {
 export class MatchStore {
   constructor(private db: DatabaseSync) {}
 
-  recordMatch(r: MatchReport): void {
+  recordMatch(r: MatchReport): number {
     const now = Date.now();
     const humans = r.players.filter((p) => !p.isBot);
     this.db.exec('BEGIN');
@@ -94,6 +94,7 @@ export class MatchStore {
         }
       }
       this.db.exec('COMMIT');
+      return matchId;
     } catch (e) {
       this.db.exec('ROLLBACK');
       throw e;
