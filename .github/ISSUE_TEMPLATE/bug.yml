@@ -1,0 +1,62 @@
+name: "\U0001F41B Bug report"
+description: Something broke, misbehaved, or crashed — tell us what and where.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you write:** we can replay bugs headlessly against bots, so
+        concrete details (ship, map, what you did, what happened) get fixed
+        *much* faster than "game broke."
+  - type: input
+    id: build
+    attributes:
+      label: Build version
+      description: Shown at the bottom of the main menu (e.g. 0.2.0)
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Browser + OS + GPU (if known)
+      placeholder: "Chrome 141 / Windows 11 / RTX 4070"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Where did it happen?
+      options:
+        - Quick Match (online)
+        - Daily challenge
+        - Ranked duel
+        - Practice vs bots (offline)
+        - Private room
+        - Main menu / website
+    validations:
+      required: true
+  - type: input
+    id: ship-map
+    attributes:
+      label: Ship + map (if in-game)
+      placeholder: "Dart on Hollowdeep"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what happened instead.
+      placeholder: "Flew through a mine-run checkpoint ring and it didn't count…"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: Steps, rough ping if online (menu → build line), anything repeatable.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output (if any)
+      description: F12 → Console. Errors in red especially.
+      render: shell

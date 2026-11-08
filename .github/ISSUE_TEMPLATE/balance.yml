@@ -1,0 +1,45 @@
+name: "\u2696\uFE0F Balance request"
+description: Something feels too strong, too weak, or wrong — bring numbers.
+labels: ["balance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **House rule: balance claims go through the sim before the forum.**
+        After you post, anyone (including you) can comment
+        `/balance <ship> <stat>=<value> ...` on this issue and a bot-vs-bot
+        A/B sim posts evidence tables back. Proposals without sim evidence
+        don't get merged — numbers first, opinions second.
+  - type: dropdown
+    id: ship
+    attributes:
+      label: Ship
+      options:
+        - Dart
+        - Mule
+        - Scythe
+        - Brute
+        - General / all ships
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What's the current behavior, in numbers where you can?
+      description: Kills/deaths in a session, matchups you lost, how long the fight took — anything measurable.
+      placeholder: "Brute torpedo one-shots my Dart through full shields — happened 4 times in one match."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+      placeholder: "Torpedo should leave me at ~30% hull when it hits a fresh shield."
+    validations:
+      required: true
+  - type: input
+    id: proposal
+    attributes:
+      label: Proposal (optional — stat = value)
+      description: "If you have one, the /balance bot can test it: e.g. `torpedo.damage=110`"
+      placeholder: "torpedo.damage=110"

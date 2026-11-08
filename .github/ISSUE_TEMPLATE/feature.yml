@@ -1,0 +1,21 @@
+name: "\U0001F4A1 Feature idea"
+description: Something the game should do that it doesn't.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: pitch
+    attributes:
+      label: The pitch — what would this add?
+      placeholder: "A spectator mode that follows the current leader…"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it fit Project Orange?
+      description: "Which loop it serves — the orange economy, the pick-up-and-play promise (under 5 MB), the daily challenges, the ranked ladder."
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope thoughts (optional)
+      description: "Rough size — a weekend, or a new subsystem? Any prior art from other browser games?"
