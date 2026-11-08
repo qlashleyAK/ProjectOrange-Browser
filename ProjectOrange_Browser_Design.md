@@ -863,7 +863,7 @@ WaitingForPlayers → Warmup (5 s; 3 s offline) → InProgress → PostMatch (12
 |---|---|---|
 | Thrust forward / back | W / S | Left stick Y |
 | Strafe left / right | A / D (double-tap = dodge) | Left stick X |
-| Up / down | Space / Z (Left Ctrl also bound) | RB / LB |
+| Up / down | Space / Z | RB / LB |
 | Pitch / yaw | Mouse (pointer lock) | Right stick |
 | Roll | Q / E | D-pad left / right |
 | Boost | Left Shift | L3 |
@@ -880,7 +880,10 @@ WaitingForPlayers → Warmup (5 s; 3 s offline) → InProgress → PostMatch (12
 | Menu / release mouse | Esc | — |
 
 - **Browser hazards:** `Ctrl+W` closes the tab and cannot be blocked, and
-  Alt opens menus on some platforms. That's why the defaults use Z and F.
+  Alt opens menus on some platforms. That's why the defaults use Z and F,
+  and why Ctrl is not bound to anything in flight: "down on Ctrl" plus W for
+  thrust is Ctrl+W. While a match is running the page also asks before
+  unloading, so a stray Ctrl+W gets a "Leave site?" prompt.
 - Call `preventDefault` on every handled key (Tab, Space).
 - In Chromium fullscreen, use `navigator.keyboard.lock()` where available.
 - Test every binding in Chrome, Firefox, and Safari.
@@ -1884,7 +1887,7 @@ Sound list:
 | 5 | Firing / ability / pickup ends spawn protection | Yes |
 | 6 | Bot backfill target | 6 participants (large arena) |
 | 7 | Room size | 8 participants |
-| 8 | Browser-safe keys | Brake F, Down Z (+ Ctrl), dodge V |
+| 8 | Browser-safe keys | Brake F, Down Z (never Ctrl: Ctrl+W closes the tab), dodge V |
 | 9 | Flight Assist | On by default; X toggles Newtonian |
 | 10 | Collision damage | Off |
 | 11 | Self-damage from splash | Off |

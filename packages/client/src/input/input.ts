@@ -7,7 +7,9 @@ const MOUSE_GAIN = 0.2;
 const DOUBLE_TAP_MS = 250;
 const JOY_RADIUS = 160;
 
-const BLOCKED = new Set(['Tab', 'Space', 'ShiftLeft', 'ControlLeft', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyZ', 'KeyF', 'KeyV',
+// Ctrl is deliberately NOT a flight key: Ctrl held for "down" + W for thrust is Ctrl+W, which closes the tab
+// and can't be cancelled by the page. Z is down.
+const BLOCKED = new Set(['Tab', 'Space', 'ShiftLeft', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyZ', 'KeyF', 'KeyV',
   'KeyR', 'KeyG', 'KeyX', 'KeyC', 'KeyH', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 /** Keyboard + pointer-lock mouse + gamepad, sampled once per simulation tick into an InputCmd. */
@@ -80,14 +82,14 @@ export class InputManager {
         if (this.keys.has('KeyV')) this.latched |= dodgeFlagFor(e.code);
         break;
       }
-      case 'Space': case 'KeyZ': case 'ControlLeft':
+      case 'Space': case 'KeyZ':
         if (this.keys.has('KeyV')) this.latched |= dodgeFlagFor(e.code);
         break;
       case 'KeyV': {
         if (this.keys.has('KeyA')) this.latched |= InputFlag.DodgeL;
         else if (this.keys.has('KeyD')) this.latched |= InputFlag.DodgeR;
         else if (this.keys.has('Space')) this.latched |= InputFlag.DodgeU;
-        else if (this.keys.has('KeyZ') || this.keys.has('ControlLeft')) this.latched |= InputFlag.DodgeD;
+        else if (this.keys.has('KeyZ')) this.latched |= InputFlag.DodgeD;
         break;
       }
     }
@@ -153,7 +155,7 @@ export class InputManager {
       roll = this.k('KeyE') - this.k('KeyQ');
       fwd = this.k('KeyW') - this.k('KeyS');
       right = this.k('KeyD') - this.k('KeyA');
-      up = this.k('Space') - Math.max(this.k('KeyZ'), this.k('ControlLeft'));
+      up = this.k('Space') - this.k('KeyZ');
       if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) flags |= InputFlag.Boost;
       if (this.keys.has('KeyF')) flags |= InputFlag.Brake;
       if (this.mouseButtons & 1) flags |= InputFlag.Primary;

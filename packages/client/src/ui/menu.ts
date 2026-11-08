@@ -30,7 +30,7 @@ export interface PauseActions {
 }
 
 const KEYS: [string, string][] = [
-  ['W / S', 'Thrust forward / back'], ['A / D', 'Strafe (double-tap: dodge)'], ['Space / Z', 'Up / down (Ctrl also down)'],
+  ['W / S', 'Thrust forward / back'], ['A / D', 'Strafe (double-tap: dodge)'], ['Space / Z', 'Up / down'],
   ['Mouse', 'Pitch / yaw'], ['Q / E', 'Roll'], ['Shift', 'Boost'], ['F', 'Brake'], ['V + dir', 'Dodge'],
   ['LMB', 'Primary fire'], ['RMB', 'Hold to lock, release to fire'], ['R / MMB', 'Repel'], ['G / Mouse 4', 'Class ability'],
   ['X', 'Flight Assist toggle'], ['C', '1st / 3rd person'], ['Tab', 'Scoreboard (hold)'], ['H', 'Debug overlay'],

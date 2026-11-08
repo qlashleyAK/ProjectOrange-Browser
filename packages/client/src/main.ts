@@ -380,6 +380,8 @@ async function boot(): Promise<void> {
     }
   });
   window.addEventListener('keydown', () => audio.unlock(), { once: true });
+  // a stray Ctrl+W / Cmd+W mid-match gets the browser's "Leave site?" prompt instead of closing the tab
+  window.addEventListener('beforeunload', (e) => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('pointerdown', () => audio.unlock(), { once: true });
 
   document.addEventListener('visibilitychange', () => {
