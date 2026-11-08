@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "soak": "pnpm --filter @orange/shared soak",
+    "balance": "pnpm --filter @orange/shared balance",
     "repro": "pnpm --filter @orange/client repro"
   },
   "devDependencies": {

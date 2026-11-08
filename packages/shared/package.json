@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
-    "soak": "tsx scripts/soak.ts"
+    "soak": "tsx scripts/soak.ts",
+    "balance": "tsx scripts/balance.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-deterministic-compat": "0.21.0"
