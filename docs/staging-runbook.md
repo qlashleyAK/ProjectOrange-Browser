@@ -6,7 +6,10 @@ owner-approved; the old cfargotunnel demo stays in the CF account, unrouted.)
 Debug URL: https://staging.projectorange.nexus · direct IP http://45.55.189.32.
 Cloudflare-proxied, edge TLS; origin Caddy self-signed on 443 under zone SSL
 mode Full.
-**Droplet:** `617032671` · orange-staging · nyc3 · `s-1vcpu-2gb` (~$12/mo) · Ubuntu 24.04
+**Droplet:** `617046019` · orange-staging-sfo · **sfo3** · `s-1vcpu-2gb` (~$12/mo) · Ubuntu 24.04
+(Moved from nyc3 2026-11-08 for Alaska/West Coast latency — owner request. The
+nyc3 droplet `617032671` was destroyed after cutover; one droplet at a time.)
+**IP:** 147.182.226.93 (was 45.55.189.32 — DNS records updated 2026-11-08).
 **Tags:** `orange-staging` `dzhopa-dream` `destroyable`
 **SSH key:** `dzhopa-dream-orange-staging` (ed25519) in the DO account; private half
 sealed at `/opt/data/.do/staging_ed25519` on the dzhopa-dream host. Root@ only.
@@ -40,7 +43,7 @@ repo or any token. (Repo goes public before launch anyway, but keep the habit.)
 
 ## Verify
 
-- `curl https://staging.projectorange.nexus/ping` → `{ok:true, region:"nyc3", ...}`
+- `curl https://projectorange.nexus/ping` → `{ok:true, region:"sfo3", ...}`
 - `curl http://<ip>/quickplay` → room assignment
 - `curl http://<ip>/api/leaderboard?window=week` → rows (empty until matches finish)
 - `curl http://<ip>/api/daily` → today's rotating mode + seed (deterministic)
