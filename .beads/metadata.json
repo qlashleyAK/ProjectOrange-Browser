@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "projectorange_browser",
+  "project_id": "c350ca3a-b9f2-4317-beaf-8643d7857ad0"
+}
