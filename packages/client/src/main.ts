@@ -16,6 +16,7 @@ import { WorkerTransport, WsTransport } from './net/transport';
 import { CameraRig } from './render/camera';
 import { Effects } from './render/effects';
 import { LightRig } from './render/lights';
+import { CheckpointRenderer } from './render/checkpoints';
 import { PowerupRenderer } from './render/powerups';
 import { MissileRenderer, PickupRenderer, ProjectileRenderer } from './render/projectiles';
 import { Renderer } from './render/renderer';
@@ -24,7 +25,7 @@ import { onSettings, saveSettings, settings, type Quality } from './settings';
 import { Menu } from './ui/menu';
 import type { ShipView, ViewSource } from './view';
 
-type SessionKind = 'quick' | 'private' | 'practice';
+type SessionKind = 'quick' | 'private' | 'practice' | 'daily';
 interface Session { source: ViewSource; kind: SessionKind; room: string | null; origin: string }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -59,12 +60,12 @@ async function pingRegions(): Promise<RegionInfo | null> {
   return results[0] ?? null;
 }
 
-/** `arena` only matters if the server has to create the room; existing rooms keep their map. */
-function wsUrl(origin: string, room: string, isPrivate: boolean, arena: string): string {
+/** `arena` only matters if the server has to create the room; existing rooms keep their map. `daily` joins today's challenge room. */
+function wsUrl(origin: string, room: string | null, isPrivate: boolean, arena: string, daily = false): string {
   const u = new URL(origin);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   u.pathname = '/ws';
-  u.search = `?room=${encodeURIComponent(room)}${isPrivate ? '&private=1' : ''}&arena=${encodeURIComponent(arena)}`;
+  u.search = daily ? '?daily=1' : `?room=${encodeURIComponent(room ?? '')}${isPrivate ? '&private=1' : ''}&arena=${encodeURIComponent(arena)}`;
   return u.toString();
 }
 
@@ -121,6 +122,7 @@ async function boot(): Promise<void> {
   const missileR = new MissileRenderer(renderer.scene, effects);
   const pickupR = new PickupRenderer(renderer.scene);
   const powerupR = new PowerupRenderer(renderer.scene, effects);
+  const checkpointR = new CheckpointRenderer(renderer.scene);
   const camRig = new CameraRig(renderer.camera);
   const presenter = new Presenter(effects, shipR, camRig, renderer.camera);
   console.info(`arena ready in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -176,11 +178,12 @@ async function boot(): Promise<void> {
   };
 
   // ---------------------------------------------------------------- menus
-  const inviteLink = () => (session && session.kind !== 'practice' && session.room ? `${location.origin}${location.pathname}?room=${session.room}` : null);
+  const inviteLink = () => (session && (session.kind === 'quick' || session.kind === 'private') && session.room ? `${location.origin}${location.pathname}?room=${session.room}` : null);
 
   const showMain = () => {
     menu.showMain({
       quickPlay: () => void startOnline('quick', null),
+      daily: () => void startOnline('daily', null),
       practice: () => startPractice(),
       createPrivate: () => void startOnline('private', randomCode()),
       joinPrivate: (code) => void startOnline('private', code),
@@ -236,7 +239,7 @@ async function boot(): Promise<void> {
       if (kind === 'practice') { console.warn('offline worker failed, falling back to main thread', detail); endSession(false); startPractice(true); return; }
       endSession(false);
       menu.showMessage('Disconnected', detail ?? 'The connection to the server was lost.', [
-        { label: 'Reconnect', fn: () => void startOnline(kind === 'private' ? 'private' : 'quick', room) }, { label: 'Back to menu', fn: showMain },
+        { label: 'Reconnect', fn: () => void startOnline(kind === 'private' || kind === 'daily' ? kind : 'quick', room) }, { label: 'Back to menu', fn: showMain },
       ]);
     }
   };
@@ -252,10 +255,10 @@ async function boot(): Promise<void> {
     if (settings.firstVisit) { settings.firstVisit = false; saveSettings(); }
   };
 
-  const startOnline = async (kind: 'quick' | 'private', room: string | null) => {
+  const startOnline = async (kind: 'quick' | 'private' | 'daily', room: string | null) => {
     audio.unlock();
     connecting = true;
-    menu.showMessage('Connecting…', kind === 'private' ? `Room ${room}` : 'Finding a match', [{ label: 'Cancel', fn: () => { endSession(); } }]);
+    menu.showMessage('Connecting…', kind === 'private' ? `Room ${room}` : kind === 'daily' ? "Today's daily challenge" : 'Finding a match', [{ label: 'Cancel', fn: () => { endSession(); } }]);
     const region = bestRegion ?? { origin: location.origin, name: 'local', ping: 0 };
     let code = room;
     if (kind === 'quick') {
@@ -274,7 +277,7 @@ async function boot(): Promise<void> {
     if (kind === 'private' && code) history.replaceState(null, '', `${location.pathname}?room=${code}`);
     const cls = settings.firstVisit ? 'dart' : settings.lastClass;
     const src = new OnlineSource(arena, input, settings.name || 'Pilot', cls, {
-      makeTransport: () => new WsTransport(wsUrl(region.origin, code!, kind === 'private', settings.arena)),
+      makeTransport: () => new WsTransport(wsUrl(region.origin, code, kind === 'private', settings.arena, kind === 'daily')),
       offline: false,
       token: settings.token || undefined,
       onToken: (t) => { settings.token = t; saveSettings(); },
@@ -314,6 +317,7 @@ async function boot(): Promise<void> {
     projR.update([]);
     missileR.update([], 0, renderer.camera);
     pickupR.update([], 0, renderer.camera);
+    checkpointR.clear();
     effects.clear();
     audio.stopAllLoops();
     audio.engine(null);
@@ -472,6 +476,9 @@ async function boot(): Promise<void> {
     missileR.update(missiles, dt, renderer.camera);
     pickupR.update(src.pickups(), time, renderer.camera);
     powerupR.update(src.powerup(), time, dt);
+    const mv = src.match();
+    const myCheckpoint = roster.find((r) => r.id === localId)?.checkpoint ?? 0;
+    checkpointR.update(mv.mode === 'mine-run' && mv.phase === 'inProgress' ? mv.course : [], myCheckpoint, time);
     const extra: typeof effects.lightRequests = [];
     shipR.auraLights(extra);
     const placeId = arenaView.updateVisibility(camPos);
@@ -569,6 +576,8 @@ async function boot(): Promise<void> {
       pos: v ? { x: r1(v.pos.x), y: r1(v.pos.y), z: r1(v.pos.z) } : null,
       speed: v ? r1(Math.hypot(v.vel.x, v.vel.y, v.vel.z)) : null,
       kills: me?.kills ?? null, deaths: me?.deaths ?? null,
+      gameMode: m?.mode ?? null, wave: m?.wave ?? null, score: me?.score ?? null, checkpoint: me?.checkpoint ?? null,
+      courseLength: m?.course.length ?? null,
       ships: roster.length, bots: roster.filter((r) => r.isBot).length, humans: roster.filter((r) => !r.isBot).length,
     };
   };

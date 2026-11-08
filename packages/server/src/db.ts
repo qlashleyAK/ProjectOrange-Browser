@@ -167,18 +167,23 @@ export class MatchStore {
     return challenge;
   }
 
-  /** Daily leaderboard: everyone's mode score on a given day's challenge, best first. */
+  /**
+   * Daily leaderboard: each pilot's BEST run on a given day's challenge, best first — replaying can only
+   * improve your line, never fill the board. (SQLite returns the bare columns from the MAX(score) row.)
+   */
   dailyLeaderboard(date: string, limit = 50): unknown[] {
     const c = dailyChallenge(date);
     const from = Date.parse(date + 'T00:00:00Z');
     const to = from + 86400000;
     return this.db.prepare(`
-      SELECT COALESCE(p.handle, mp.name) AS handle, mp.score, mp.kills, mp.deaths, mp.oranges, mp.placement, m.ended_at, m.arena
+      SELECT COALESCE(p.handle, mp.name) AS handle, MAX(mp.score) AS score, mp.kills, mp.deaths, mp.oranges, mp.placement, m.ended_at, m.arena,
+             COUNT(*) AS runs
       FROM match_players mp
       JOIN matches m ON m.id = mp.match_id
       LEFT JOIN players p ON p.token = mp.token
       WHERE mp.is_bot = 0 AND m.mode = ? AND m.ended_at >= ? AND m.ended_at < ?
-      ORDER BY mp.score DESC, mp.placement ASC
+      GROUP BY COALESCE(mp.token, mp.name)
+      ORDER BY score DESC, mp.placement ASC
       LIMIT ?`,
     ).all(c.mode, from, to, limit);
   }

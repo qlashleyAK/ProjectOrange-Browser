@@ -1,0 +1,24 @@
+{
+  "name": "Daily challenge: join today's room, mode HUD, daily board",
+  "description": "The main menu's Daily challenge joins the shared daily room over WebSocket; the HUD switches to the day's mode (Survival waves / Score Attack score / Mine Run checkpoints + course marker); the Daily leaderboard tab answers. Mode-agnostic: today's rotation decides which branch is checked.",
+  "settings": { "lastClass": "dart" },
+  "steps": [
+    { "do": "waitFor", "until": "p.menu === 'main'", "timeoutMs": 60000 },
+    { "do": "expect", "that": "[...document.querySelectorAll('button')].some((b) => /^Daily challenge(Survival|Score Attack|Mine Run)/.test(b.textContent))", "label": "menu names today's mode" },
+    { "do": "click", "text": "Daily challenge" },
+    { "do": "waitFor", "until": "p.online && p.mode === 'daily' && p.alive === true && ['survival', 'score-attack', 'mine-run'].includes(p.gameMode)", "timeoutMs": 60000 },
+    { "do": "waitFor", "until": "p.phase === 'inProgress'", "timeoutMs": 30000 },
+    { "do": "expect", "that": "p.gameMode === 'mine-run' ? p.courseLength === 10 && /Checkpoint \\d+\\/10/.test(document.querySelector('.match .score').textContent) : p.gameMode === 'survival' ? /^WAVE \\d+$/.test(document.querySelector('.match .timer').textContent) : /^Score \\d+/.test(document.querySelector('.match .score').textContent)", "label": "HUD shows the mode's readout" },
+    { "do": "expect", "that": "p.gameMode !== 'mine-run' || !document.querySelector('.cp-marker').classList.contains('hidden') || !document.querySelector('.cp-arrow').classList.contains('hidden')", "label": "mine run: next-checkpoint marker or edge arrow is up" },
+    { "do": "screenshot", "name": "daily-hud" },
+    { "do": "press", "key": "Escape" },
+    { "do": "waitFor", "until": "p.menu === 'pause'", "timeoutMs": 10000 },
+    { "do": "click", "text": "Leave match" },
+    { "do": "waitFor", "until": "p.menu === 'main' && p.mode === 'menu'", "timeoutMs": 10000 },
+    { "do": "click", "text": "Leaderboards" },
+    { "do": "click", "text": "Daily" },
+    { "do": "waitFor", "until": "p.menu === 'leaderboards' && /No runs on today's|Score/.test(document.querySelector('.board').textContent)", "timeoutMs": 15000 },
+    { "do": "screenshot", "name": "daily-board" },
+    { "do": "noErrors" }
+  ]
+}

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   arenaInfo, CLASSES, CLASS_LIST, KILLS_TO_WIN, MAX_POWER, nextTierUnits, POWERUP_DURATION_S, POWERUPS, PRIMARY_TABLE,
-  type ClassId, type GameEvent, type PowerupKind, type RosterEntry,
+  type ClassId, type GameEvent, type GameMode, type PowerupKind, type RosterEntry,
 } from '@orange/shared';
 import { settings } from '../settings';
 import { accentCss } from '../ships/materials';
@@ -72,6 +72,10 @@ export class Hud {
   private arrows: HTMLElement[] = [];
   private pwMarker: HTMLElement;
   private pwArrow: HTMLElement;
+  private cpMarker: HTMLElement;
+  private cpArrow: HTMLElement;
+  /** the room's mode, from the last frame — events read it */
+  private mode: GameMode = 'ffa';
   private pwTimer: HTMLElement;
   private pwBar: HTMLElement;
   private pwLabel: HTMLElement;
@@ -163,6 +167,8 @@ export class Hud {
     this.lockEl = el('div', 'lock hidden', this.markerLayer);
     this.pwMarker = el('div', 'pw-marker hidden', this.markerLayer);
     this.pwArrow = el('div', 'edge-arrow pw-arrow hidden', this.markerLayer);
+    this.cpMarker = el('div', 'pw-marker cp-marker hidden', this.markerLayer);
+    this.cpArrow = el('div', 'edge-arrow pw-arrow cp-arrow hidden', this.markerLayer);
     this.hitmark = el('div', 'hitmark', this.layer);
     this.dmgArc = el('div', 'dmg-arc', this.layer);
 
@@ -326,7 +332,16 @@ export class Hud {
         }
         break;
       case 'phase':
-        if (e.phase === 'inProgress') this.showBanner('FIGHT!', `First to ${KILLS_TO_WIN} kills`, 1.6);
+        if (e.phase === 'inProgress') this.showBanner(MODE_INFO[this.mode].start, MODE_INFO[this.mode].rule, 2);
+        break;
+      case 'wave':
+        this.showBanner(`WAVE ${e.wave}`, `${e.count} hostile${e.count === 1 ? '' : 's'} inbound`, 2);
+        break;
+      case 'checkpoint':
+        if (e.shipId === me) {
+          if (e.index >= e.total) this.showBanner('COURSE COMPLETE', `All ${e.total} checkpoints`, 2.6);
+          else this.toast(`CHECKPOINT ${e.index}/${e.total}`, '#5affdc', 1.4);
+        }
         break;
       case 'powerupSpawn': this.toast(`${POWERUPS[e.kind].name.toUpperCase()} HAS SPAWNED`, powerupCss(e.kind), 2.2); break;
       case 'powerupTake': {
@@ -460,7 +475,8 @@ export class Hud {
     }
     for (let i = mi; i < this.markers.length; i++) this.markers[i]!.style.display = 'none';
     for (let i = ai; i < this.arrows.length; i++) this.arrows[i]!.style.display = 'none';
-    this.updatePowerupMarker(f, alive && !post);
+    this.updatePowerupMarker(f, alive && !post && f.match.mode !== 'mine-run');
+    this.updateCheckpointMarker(f, alive && !post);
 
     if (alive && settings.leadPip && best && L && lv) {
       const speed = L.primary.speed;
@@ -513,9 +529,13 @@ export class Hud {
     // match
     const m = f.match;
     const myRow = f.roster.find((r) => r.id === L?.shipId);
+    this.mode = m.mode;
     const leader = f.roster.slice().sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
-    this.timer.textContent = m.phase === 'inProgress' ? fmtTime(m.timeLeft) : m.phase === 'warmup' ? `WARMUP ${Math.ceil(m.timeLeft)}` : m.phase === 'waiting' ? 'WAITING' : 'MATCH OVER';
-    this.score.textContent = myRow && leader ? `You ${myRow.kills}  ·  Leader ${leader.kills}  ·  First to ${KILLS_TO_WIN}` : '';
+    const live = m.phase === 'inProgress';
+    this.timer.textContent = live
+      ? m.mode === 'survival' ? `WAVE ${m.wave}` : m.mode === 'mine-run' ? `${fmtTime(m.elapsed)}  ·  ${fmtTime(m.timeLeft)} left` : fmtTime(m.timeLeft)
+      : m.phase === 'warmup' ? `WARMUP ${Math.ceil(m.timeLeft)}` : m.phase === 'waiting' ? 'WAITING' : 'MATCH OVER';
+    this.score.textContent = !myRow ? '' : modeScoreLine(m, myRow, f.roster, leader);
     if (m.phase === 'warmup') {
       const n = Math.ceil(m.timeLeft);
       if (n !== this.lastCountdown && n > 0) { this.lastCountdown = n; this.showBanner(`WARMUP ${n}…`, 'Weapons safe', 1.05); this.onCountdown(n); }
@@ -581,6 +601,37 @@ export class Hud {
       this.pwArrow.style.left = `${W / 2 + Math.cos(ang) * r - 8}px`; this.pwArrow.style.top = `${H / 2 + Math.sin(ang) * r - 7}px`;
       this.pwArrow.style.transform = `rotate(${ang + Math.PI / 2}rad)`;
       this.pwArrow.style.color = color;
+    }
+  }
+
+  /** Mine run: the next checkpoint for the local pilot, on screen or as an edge arrow. */
+  private updateCheckpointMarker(f: HudFrame, show: boolean): void {
+    const me = f.roster.find((r) => r.id === f.local?.shipId);
+    const course = f.match.course;
+    const next = me && f.match.mode === 'mine-run' && f.match.phase === 'inProgress' ? course[me.checkpoint] : undefined;
+    if (!show || !next || !me) { this.cpMarker.classList.add('hidden'); this.cpArrow.classList.add('hidden'); return; }
+    const p = new THREE.Vector3(next.x, next.y, next.z);
+    const lv = f.localView;
+    const d = lv ? p.distanceTo(new THREE.Vector3(lv.pos.x, lv.pos.y, lv.pos.z)) : p.distanceTo(f.camera.position);
+    const scr = this.project(p, f.camera);
+    if (scr.on) {
+      this.cpArrow.classList.add('hidden');
+      this.cpMarker.classList.remove('hidden');
+      this.cpMarker.style.left = `${scr.x}px`; this.cpMarker.style.top = `${scr.y}px`;
+      const key = `${me.checkpoint}|${Math.round(d / 10)}`;
+      if (this.cpMarker.dataset.key !== key) {
+        this.cpMarker.dataset.key = key;
+        this.cpMarker.innerHTML = `<div class="gem"></div><div>CHECKPOINT ${me.checkpoint + 1}/${course.length}</div><small>${Math.round(d)}m</small>`;
+      }
+    } else {
+      this.cpMarker.classList.add('hidden');
+      const W = window.innerWidth, H = window.innerHeight;
+      let dx = scr.x - W / 2, dy = scr.y - H / 2;
+      if (scr.behind) { dx = -dx; dy = -dy; }
+      const ang = Math.atan2(dy, dx), r = Math.min(W, H) * 0.42;
+      this.cpArrow.classList.remove('hidden');
+      this.cpArrow.style.left = `${W / 2 + Math.cos(ang) * r - 8}px`; this.cpArrow.style.top = `${H / 2 + Math.sin(ang) * r - 7}px`;
+      this.cpArrow.style.transform = `rotate(${ang + Math.PI / 2}rad)`;
     }
   }
 
@@ -682,6 +733,14 @@ export class Hud {
     if (!show || !L) return;
     const killer = L.killerId >= 0 && L.killerId !== L.shipId ? f.roster.find((r) => r.id === L.killerId) : null;
     this.deathTitle.textContent = killer ? `DESTROYED BY ${killer.name.toUpperCase()}` : 'DESTROYED';
+    if (f.match.mode === 'survival' && f.match.phase === 'inProgress') {
+      // no respawns in survival: the run is over for this pilot until the last one falls
+      this.deathTitle.textContent = killer ? `OUT — ${killer.name.toUpperCase()} GOT YOU` : 'OUT';
+      this.deathSub.textContent = `No respawns in Survival — you reached wave ${f.match.wave}. The run ends when the last pilot falls.`;
+      for (const [id, card] of this.cards) card.classList.toggle('sel', id === this.selectedClass);
+      this.launchHint.textContent = 'Pick your ship for the next run (1–4).';
+      return;
+    }
     const wait = L.respawnIn > 0 ? `Respawn in ${L.respawnIn.toFixed(1)} s` : this.pickerOpen ? 'Ready' : 'Launching…';
     this.deathSub.textContent = `${wait}${this.pickerOpen ? `  ·  spawn held (${Math.ceil(L.holdLeft)} s)` : ''}`;
     for (const [id, card] of this.cards) card.classList.toggle('sel', id === this.selectedClass);
@@ -693,10 +752,11 @@ export class Hud {
     this.scoreboard.classList.toggle('hidden', !show);
     if (!show) return;
     const me = f.local?.shipId;
-    const rows = f.roster.slice().sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage);
-    const html = `<div class="panel scoreboard"><h2>SCOREBOARD</h2><table><tr><th>Pilot</th><th>Ship</th><th>K</th><th>D</th><th>A</th><th>Power</th><th>Ping</th></tr>
+    const daily = f.match.mode !== 'ffa';
+    const rows = sortRows(f.roster, f.match.mode);
+    const html = `<div class="panel scoreboard"><h2>${daily ? MODE_INFO[f.match.mode].start : 'SCOREBOARD'}</h2><table><tr><th>Pilot</th><th>Ship</th>${daily ? '<th>Score</th>' : ''}<th>K</th><th>D</th><th>A</th><th>Power</th><th>Ping</th></tr>
       ${rows.map((r) => `<tr class="${r.id === me ? 'me' : ''}"><td style="color:${accentCss(r.accent)}">${esc(r.name)} ${r.isBot ? '<span class="bot">[BOT]</span>' : ''}${r.connected ? '' : ' <span class="bot">(reconnecting)</span>'}</td>
-        <td>${CLASSES[r.classId].name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.assists}</td><td class="orange">${r.power}</td><td>${r.isBot ? '—' : f.online ? r.ping : '—'}</td></tr>`).join('')}
+        <td>${CLASSES[r.classId].name}</td>${daily ? `<td>${r.score}</td>` : ''}<td>${r.kills}</td><td>${r.deaths}</td><td>${r.assists}</td><td class="orange">${r.power}</td><td>${r.isBot ? '—' : f.online ? r.ping : '—'}</td></tr>`).join('')}
       </table></div>`;
     if (this.scoreboard.dataset.h !== html) { this.scoreboard.dataset.h = html; this.scoreboard.innerHTML = html; }
   }
@@ -706,18 +766,46 @@ export class Hud {
     this.post.classList.toggle('hidden', !show);
     if (!show) return;
     const me = f.local?.shipId;
-    const rows = f.roster.slice().sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage);
+    const daily = f.match.mode !== 'ffa';
+    const rows = sortRows(f.roster, f.match.mode);
     const winner = rows.find((r) => r.id === f.match.winnerId) ?? rows[0];
     const mine = rows.find((r) => r.id === me);
-    const p = (r: RosterEntry | undefined, cls: string) => r ? `<div class="${cls}"><div style="color:${accentCss(r.accent)};font-weight:800">${esc(r.name)}</div><div>${r.kills} kills</div></div>` : '';
+    const p = (r: RosterEntry | undefined, cls: string) => r ? `<div class="${cls}"><div style="color:${accentCss(r.accent)};font-weight:800">${esc(r.name)}</div><div>${daily ? `${r.score} pts` : `${r.kills} kills`}</div></div>` : '';
     const acc = mine && mine.shotsFired > 0 ? Math.round((mine.shotsHit / mine.shotsFired) * 100) : 0;
     const html = `<div class="panel postmatch"><h1>${winner ? `${esc(winner.name.toUpperCase())} WINS` : 'MATCH OVER'}</h1>
       <div class="sub">Next match${f.match.nextArena ? ` on <b>${esc(arenaInfo(f.match.nextArena).name)}</b>` : ''} in ${Math.ceil(f.match.timeLeft)} s</div>
       <div class="podium">${p(rows[1], 'p2')}${p(rows[0], 'p1')}${p(rows[2], 'p3')}</div>
+      ${mine && daily ? `<div class="sub daily-result">Your ${MODE_INFO[f.match.mode].name} score: <b>${mine.score}</b>${f.match.mode === 'survival' ? ` · wave ${f.match.wave}` : ''}${f.match.mode === 'mine-run' ? ` · ${mine.checkpoint}/${f.match.course.length} checkpoints` : ''} — on today's daily leaderboard</div>` : ''}
       ${mine ? `<div class="sub">You: ${mine.kills} K · ${mine.deaths} D · ${mine.assists} A · ${mine.damage} damage · ${acc}% accuracy · ${mine.oranges} oranges · peak power ${mine.peakPower}</div>` : ''}
       <table><tr><th>#</th><th>Pilot</th><th>Ship</th><th>K</th><th>D</th><th>A</th><th>Damage</th></tr>
       ${rows.map((r, i) => `<tr class="${r.id === me ? 'me' : ''}"><td>${i + 1}</td><td style="color:${accentCss(r.accent)}">${esc(r.name)} ${r.isBot ? '<span class="bot">[BOT]</span>' : ''}</td><td>${CLASSES[r.classId].name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.assists}</td><td>${r.damage}</td></tr>`).join('')}
       </table>${this.inviteLink ? '<button class="btn" data-invite style="margin-top:14px">COPY INVITE LINK</button>' : ''}</div>`;
     if (this.post.dataset.h !== html) { this.post.dataset.h = html; this.post.innerHTML = html; }
+  }
+}
+
+/** How each mode introduces itself and what the HUD calls it. */
+const MODE_INFO: Record<GameMode, { name: string; start: string; rule: string }> = {
+  ffa: { name: 'FFA', start: 'FIGHT!', rule: `First to ${KILLS_TO_WIN} kills` },
+  'score-attack': { name: 'Score Attack', start: 'SCORE ATTACK', rule: 'Kills 100 · assists 25 · oranges 10 — highest score in 5 minutes' },
+  survival: { name: 'Survival', start: 'SURVIVAL', rule: 'Outlast the waves — no respawns' },
+  'mine-run': { name: 'Mine Run', start: 'MINE RUN', rule: 'Fly the checkpoints in order — weapons offline' },
+};
+
+/** Daily modes rank on score; FFA on kills, then fewest deaths, then damage. */
+function sortRows(roster: RosterEntry[], mode: GameMode): RosterEntry[] {
+  return roster.slice().sort((a, b) => (mode === 'ffa' ? 0 : b.score - a.score) || b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage);
+}
+
+function modeScoreLine(m: MatchView, me: RosterEntry, roster: RosterEntry[], leader: RosterEntry | undefined): string {
+  const best = Math.max(0, ...roster.map((r) => r.score));
+  switch (m.mode) {
+    case 'score-attack': return `Score ${me.score}  ·  Best ${best}`;
+    case 'survival': {
+      const hostiles = roster.filter((r) => r.isBot && r.alive).length;
+      return `${hostiles} hostile${hostiles === 1 ? '' : 's'} left  ·  Score ${me.score}`;
+    }
+    case 'mine-run': return `Checkpoint ${Math.min(me.checkpoint, m.course.length)}/${m.course.length}  ·  Score ${me.score}`;
+    default: return leader ? `You ${me.kills}  ·  Leader ${leader.kills}  ·  First to ${KILLS_TO_WIN}` : '';
   }
 }

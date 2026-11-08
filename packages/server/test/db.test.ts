@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { MatchStore, openDb } from '../src/db.js';
-import type { MatchReport, MatchReportPlayer } from '@orange/shared';
+import { dailyChallenge, type MatchReport, type MatchReportPlayer } from '@orange/shared';
 
 function player(partial: Partial<MatchReportPlayer> & { playerId: string; name: string }): MatchReportPlayer {
   return {
@@ -108,6 +108,23 @@ describe('MatchStore', () => {
     expect(p.classes.map((c) => c.classId)).toEqual(['scythe', 'brute']);
     expect(p.classes[0]).toMatchObject({ matches: 2, kills: 8 });
     expect(s.profile('tokB')!.wins).toBe(1); // other pilots unaffected
+  });
+
+  it('the daily board keeps each pilot\'s best run only', () => {
+    const s = fresh();
+    const today = new Date().toISOString().slice(0, 10);
+    const mode = dailyChallenge(today).mode;
+    const run = (token: string, name: string, score: number, n: number) => s.recordMatch(report({
+      mode, matchNumber: n, roomId: `DAILY-${today}`,
+      players: [player({ playerId: `p:${token}`, token, name, score }), player({ playerId: `bot:${n}`, name: 'Bot', isBot: true, score: 99999 })],
+    }));
+    run('tokA', 'Alice', 500, 1);
+    run('tokA', 'Alice', 900, 2);
+    run('tokB', 'Bob', 700, 3);
+    run('tokA', 'Alice', 300, 4);
+    s.recordMatch(report({ mode: 'ffa', matchNumber: 5, players: [player({ playerId: 'p:tokC', token: 'tokC', name: 'Cat', score: 5000 })] }));
+    const rows = s.dailyLeaderboard(today) as { handle: string; score: number; runs: number }[];
+    expect(rows.map((r) => [r.handle, r.score, r.runs])).toEqual([['Alice', 900, 3], ['Bob', 700, 1]]); // bots and other modes excluded
   });
 
   it('daily seeds are stable per date and rotate modes', () => {

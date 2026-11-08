@@ -210,3 +210,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .panel .ranks { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 4px 0 14px; font-size: 12px; }
 .panel .ranks span { background: #0e151e; border: 1px solid #2b3d50; padding: 3px 7px; }
 .panel .ranks i { color: var(--dim); font-style: normal; }
+
+/* daily challenge */
+.cp-marker, .cp-arrow { color: #5affdc; }
+.postmatch .daily-result { color: #5affdc; }

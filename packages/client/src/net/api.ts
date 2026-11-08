@@ -14,6 +14,9 @@ export interface PilotProfile {
   classes: { classId: string; matches: number; kills: number }[];
 }
 
+/** One run on a day's challenge (best run per pilot). */
+export interface DailyRow { handle: string; score: number; kills: number; deaths: number; oranges: number; placement: number; ended_at: number; arena: string }
+
 export interface PresenceCounts { online: number; inMatch: number; onMenu: number; rooms: number }
 export interface DailyInfo { date: string; mode: string; seed: number }
 
@@ -41,6 +44,8 @@ export function serverApi(origin: string) {
         .then((r) => r.profile),
     presence: (tabId: string) => request<PresenceCounts>(`${origin}/api/presence?id=${encodeURIComponent(tabId)}`),
     daily: () => request<DailyInfo>(`${origin}/api/daily`),
+    dailyLeaderboard: (date: string, limit = 25) =>
+      request<{ rows: DailyRow[] }>(`${origin}/api/daily/leaderboard?date=${encodeURIComponent(date)}&limit=${limit}`).then((r) => r.rows),
   };
 }
 

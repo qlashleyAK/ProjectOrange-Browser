@@ -1,10 +1,12 @@
-import { arenaInfo, ARENAS, BUILD_VERSION, CLASSES, type ClassId } from '@orange/shared';
+import { arenaInfo, ARENAS, BUILD_VERSION, CLASSES, todayChallenge, type ClassId } from '@orange/shared';
 import { copyText } from '../hud/hud';
 import type { LeaderboardWindow, PilotProfile, ServerApi } from '../net/api';
 import { resetSettings, saveSettings, settings, type Settings } from '../settings';
 
 export interface MainMenuActions {
   quickPlay: () => void;
+  /** join today's daily challenge room */
+  daily: () => void;
   practice: () => void;
   createPrivate: () => void;
   joinPrivate: (code: string) => void;
@@ -14,6 +16,10 @@ export interface MainMenuActions {
 }
 
 const DAILY_MODES: Record<string, string> = { survival: 'Survival', 'score-attack': 'Score Attack', 'mine-run': 'Mine Run' };
+const DAILY_BLURB: Record<string, string> = {
+  survival: 'outlast the waves, no respawns', 'score-attack': '5 minutes, highest score', 'mine-run': 'fly the checkpoints, weapons offline',
+};
+type BoardTab = LeaderboardWindow | 'daily';
 const RANKS = ['Nugget', 'Ensign', 'Lieutenant JG', 'Lieutenant', 'Captain', 'Major', 'Colonel', 'Commander', 'Admiral'];
 
 export interface PauseActions {
@@ -129,6 +135,8 @@ export class Menu {
     const toMain = () => this.showMain(a, roomFromUrl);
     if (roomFromUrl) button(p, `Join room ${roomFromUrl}`, 'Private match from your invite link', () => { commit(); a.joinPrivate(roomFromUrl); }, true);
     button(p, 'Quick Match', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
+    const today = todayChallenge();
+    button(p, 'Daily challenge', `${DAILY_MODES[today.mode]} — ${DAILY_BLURB[today.mode]} · same seed for everyone today`, () => { commit(); a.daily(); });
     button(p, 'Ranked', '1v1 duels · rank ladder · season 1', () => { commit(); this.showRanked(toMain); });
     button(p, 'Practice vs bots', `Starts on ${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
     button(p, 'Private match', `Starts on ${map.name} · create a room or join by code`, () => { commit(); this.showPrivate(a, toMain); });
@@ -180,12 +188,12 @@ export class Menu {
     button(p, 'Back', '', back, true);
   }
 
-  showLeaderboards(a: MainMenuActions, back: () => void, win: LeaderboardWindow = 'week'): void {
+  showLeaderboards(a: MainMenuActions, back: () => void, win: BoardTab = 'week'): void {
     const p = this.open('leaderboards');
     this.back = back;
     h('h2', '', p, 'LEADERBOARDS');
     const tabs = h('div', 'tabs', p);
-    const names: [LeaderboardWindow, string][] = [['day', 'Today'], ['week', 'This week'], ['alltime', 'All time']];
+    const names: [BoardTab, string][] = [['daily', 'Daily'], ['day', 'Today'], ['week', 'This week'], ['alltime', 'All time']];
     for (const [id, label] of names) {
       const b = h('button', id === win ? 'on' : '', tabs, label);
       b.addEventListener('click', () => this.showLeaderboards(a, back, id));
@@ -196,7 +204,17 @@ export class Menu {
     const api = a.api();
     if (!api) { body.innerHTML = '<div class="sub">Leaderboards need the game server. Practice vs bots works offline.</div>'; return; }
     const screen = this.screen;
-    api.leaderboard(win).then((rows) => {
+    if (win === 'daily') {
+      const c = todayChallenge();
+      api.dailyLeaderboard(c.date).then((rows) => {
+        if (this.screen !== screen) return;
+        if (!rows.length) { body.innerHTML = `<div class="sub">No runs on today's ${DAILY_MODES[c.mode]} yet. Set the score to beat.</div>`; return; }
+        const me = settings.name.trim().toLowerCase();
+        body.innerHTML = `<table><thead><tr><th>#</th><th>Pilot</th><th>Score</th><th>Kills</th><th>Deaths</th><th>Oranges</th></tr></thead><tbody>${
+          rows.map((r, i) => `<tr${me && r.handle.toLowerCase() === me ? ' class="me"' : ''}><td>${i + 1}</td><td>${esc(r.handle)}</td><td>${r.score}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.oranges}</td></tr>`).join('')
+        }</tbody></table>`;
+      }).catch(() => { if (this.screen === screen) body.innerHTML = '<div class="sub">Couldn\'t reach the daily board. Try again in a moment.</div>'; });
+    } else api.leaderboard(win).then((rows) => {
       if (this.screen !== screen) return;
       if (!rows.length) { body.innerHTML = '<div class="sub">No finished matches in this window yet. Be the first on the board.</div>'; return; }
       const me = settings.name.trim().toLowerCase();

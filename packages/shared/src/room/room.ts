@@ -8,6 +8,7 @@ import { cloakVisible } from '../bots/perception.js';
 import type { BotSkill } from '../bots/brain.js';
 import type { GameEvent, GameMode, Ship } from '../entities.js';
 import { GameSim } from '../game.js';
+import { modeScore } from '../match.js';
 import { InputFlag, neutralInput, seqDiff, type InputCmd } from '../input.js';
 import {
   decodeInputPacket, encodePong, encodeSnapshot, END_REASONS, MsgType, primaryIndex, Reader, ShipFlag, Writer,
@@ -356,7 +357,7 @@ export class GameRoom {
       kills: s.stats.kills, deaths: s.stats.deaths, assists: s.stats.assists, power: s.power, ping: s.isBot ? 0 : pingOf(s),
       alive: s.alive, connected: s.connected, damage: Math.round(s.stats.damageDealt), shotsFired: s.stats.shotsFired,
       shotsHit: s.stats.shotsHit, oranges: s.stats.orangesCollected, peakPower: s.stats.peakPower, tier: s.tier.index,
-      maxShield: s.maxShield,
+      maxShield: s.maxShield, score: modeScore(s, this.sim.mode, this.sim), checkpoint: s.checkpoint,
     }));
   }
 
@@ -371,6 +372,8 @@ export class GameRoom {
     return {
       t: 'match', phase: m.phase, phaseEndTick: m.phaseEndTick, winnerId: m.winnerId, tick: this.sim.tick,
       arena: this.sim.arena.blueprint.id, nextArena: this.sim.upcomingArena().blueprint.id,
+      mode: this.sim.mode, wave: this.sim.wave,
+      course: this.sim.course.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, z: Math.round(p.z * 10) / 10 })),
     };
   }
   private broadcastMatch(): void {

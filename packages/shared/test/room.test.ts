@@ -111,6 +111,23 @@ describe('GameRoom', () => {
     expect(d.last('welcome')!.token).toMatch(/^[a-z0-9]{8,32}$/);
   });
 
+  it('tells clients the mode, the mine-run course and their checkpoint progress', () => {
+    let t = 0;
+    const room = new GameRoom({ id: 'DAILY-TEST', now: () => t, seed: 1234, mode: 'mine-run', rotation: false });
+    const c = new FakeClient();
+    room.connect(c);
+    room.message(c, hello('Runner'));
+    for (let i = 0; i < 60 * 7; i++) { t += DT * 1000; room.tick(); } // through warmup
+    const m = c.last('match')!;
+    expect(m.mode).toBe('mine-run');
+    expect(m.phase).toBe('inProgress');
+    expect(m.course).toHaveLength(10);
+    expect(m.course[0]).toEqual({ x: expect.any(Number), y: expect.any(Number), z: expect.any(Number) });
+    const me = c.last('roster')!.players.find((p) => !p.isBot)!;
+    expect(me.checkpoint).toBe(0);
+    expect(typeof me.score).toBe('number');
+  });
+
   it('drops a held slot after the grace period', () => {
     const { room, advance } = makeRoom();
     const a = new FakeClient();
