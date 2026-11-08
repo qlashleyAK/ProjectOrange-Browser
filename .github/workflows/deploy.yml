@@ -1,0 +1,52 @@
+# Deploy to the orange-staging droplet (projectorange.nexus) on every merge to
+# master — which, under branch protection, means: Quentin approved it.
+#
+# The droplet accepts exactly one thing from this workflow: a tarball on stdin,
+# through a forced-command deploy key that can do nothing else (no shell, no
+# scp, no port forwarding). If the deploy lands an unhealthy server, the
+# workflow FAILS and master shows red.
+name: Deploy
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Stage + verify the artifact
+        run: |
+          mkdir -p pkg
+          cp -r packages/server/dist pkg/server-dist
+          cp -r packages/client/dist pkg/client-dist
+          tar -czf deploy.tar.gz -C pkg server-dist client-dist
+          # sanity: exactly the two trees we expect
+          tar -tzf deploy.tar.gz | grep -qvE '^(server-dist/|client-dist/)' && { echo "unexpected archive contents"; exit 1; } || true
+          test -f pkg/server-dist/index.js
+      - name: Ship to the droplet (stdin tarball via restricted key)
+        env:
+          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          KNOWN_HOST: ${{ secrets.STAGING_KNOWN_HOST }}
+        run: |
+          install -m 600 /dev/null key && echo "$DEPLOY_KEY" > key
+          install -m 600 /dev/null kh && echo "$KNOWN_HOST" > kh
+          ssh -i key -o UserKnownHostsFile=kh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 root@147.182.226.93 < deploy.tar.gz
+      - name: Verify the live site
+        run: |
+          sleep 3
+          curl -fsS --max-time 20 https://projectorange.nexus/ping | grep -q '"ok":true'
+          curl -fsS --max-time 20 -o /dev/null https://projectorange.nexus/
+          echo "deployed + verified"
