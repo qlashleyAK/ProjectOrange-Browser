@@ -66,8 +66,9 @@ expected). Good balance claims get replayed through the headless bot-vs-bot
 sim before anyone argues about them: `/balance brute hull=220` on an issue posts
 the paired A/B table ([how it works](docs/balance-bot.md)), and `pnpm balance`
 runs the same thing locally. Client bugs with repro steps can be replayed
-headlessly with `pnpm repro` ([scenarios](packages/client/repro/README.md)). Issue templates are in `.github/` (as the
-public factory comes online). The repo's task board is
+headlessly with `pnpm repro` ([scenarios](packages/client/repro/README.md)). House rules and
+setup are in [CONTRIBUTING.md](CONTRIBUTING.md); security reports go to
+[SECURITY.md](SECURITY.md), never public issues. The repo's task board is
 [Dolt-backed](.beads/README.md) — `bd bootstrap` after cloning to see open work.
 
 ## License
