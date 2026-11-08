@@ -9,6 +9,12 @@ there's always someone to shoot.
 > is coming. Until then, the game runs from this repo in two commands (below).
 > Watch releases for the launch.
 
+![Project Orange gameplay: Dart, Mule, Scythe, and Brute in four arenas](assets/launch/gameplay.gif)
+
+**Watch the [30-second gameplay video](assets/launch/gameplay-30s.mp4)** (720p,
+60 fps). The footage shows Dart in Hollowdeep Mine, Mule in The Gyre, Scythe
+in Meridian Tower, and Brute in Gloamwood, all with the in-game HUD.
+
 ## The loop
 
 Kill → they spill **oranges** → grab them → your power climbs for this life →
@@ -20,8 +26,9 @@ back.
 ## What's in the box
 
 - **Four original ships** with distinct flight and counterplay identities
-- **Three maps**: Hollowdeep (the working mine), The Gyre (moving machinery),
-  Meridian Tower (orange-stuffed high-rise shafts), rotating per match
+- **Four maps**: Hollowdeep (the working mine), The Gyre (moving machinery),
+  Meridian Tower (orange-stuffed high-rise shafts), and Gloamwood (a giant
+  forest around a spire), rotating per match
 - **Bots that backfill** every match — full game offline, no server needed
 - **Rooms 2–8, join by link**, private rooms, quickmatch fills the fullest room
 - **Powerups** rotating every 30 seconds per map
