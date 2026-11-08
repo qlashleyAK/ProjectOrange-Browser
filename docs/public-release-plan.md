@@ -9,18 +9,32 @@ feature survey, full git-history scan for secrets/private URLs (clean).
 
 ## Phase 0 — Pre-public hygiene (before the repo goes public)
 
-- [ ] **History scan: done, clean** (2026-10-18). Re-run before flipping: `git log --all -p | grep -Ei '(api[_-]?key|token|secret|password|https?://[^ ]*private)'`
+- [x] **History scan: done, clean** (2026-10-18). Re-run before flipping: `git log --all -p | grep -Ei '(api[_-]?key|token|secret|password|https?://[^ ]*private)'`
+- [ ] **License: MIT + third-party NOTICES** (owner leaning yes, 2026-10-18). VIPER 11
+      is closed-source — no prior art to copy from them; the only licensing they expose
+      is third-party attribution, which we also need (three.js MIT, Rapier-compat,
+      Vite/Vitest MIT/Apache families). Decision: **MIT** with a NOTICES file.
 - [ ] Close design-doc §20 [DECISION] items (owner) — they're defaults, not choices, and
       the public will read the doc as canon
-- [ ] LICENSE: **MIT** (ships/arena are procedural code; no asset licensing tangles — confirm)
 - [ ] README rewrite for strangers: gif/video at top, play link, "how it's made" notes
       (VIPER's /notes page is the content-marketing move — copy THAT more than any feature)
 - [ ] CONTRIBUTING.md + issue templates: 🐛 bug (browser, GPU, ping, repro steps),
       ⚖️ balance (ship, current vs expected, must cite numbers), 💡 feature
 - [ ] SECURITY.md + a disclosure contact that isn't a personal email
-- [ ] Remove/confirm anything in the doc referencing the private play URL
+- [ ] Community surface: **GitHub Discussions at launch** (owner has no Discord access);
+      revisit Discord only if Discussions overflows
 
 ## Phase 1 — Hosting at projectorange.nexus (the boring, correct base)
+
+**Provider decision (2026-10-18): DigitalOcean, NYC region.** Reasons: US-East
+latency for players, managed-Postgres path matching our SQLite→PG migration,
+per-second billing for scale-out — and, the deciding factor for this family:
+**DO's docs ship an official MCP reference for AI agents**, so a Hermes agent
+registers the DO MCP server and provisions/scales droplets, firewalls, DNS and
+managed Postgres directly from chat or cron — no dashboard-clicking required.
+(Hetzner's 2026 repricing + weak US footprint and Vultr's thinner agent story
+lost; revisit only if costs diverge.) Cloudflare stays the edge layer (also
+official-MCP-managed).
 
 **Architecture: static assets ≠ game servers.**
 
@@ -53,15 +67,20 @@ presence. Translated to Orange, keeping the design doc's no-account-first ethos:
    (the doc already promises "no account"); stats keyed to the token; passkey sign-in
    later for the competitive crowd only. VIPER's "Level 1 Cadet" → rank titles earned
    by lifetime oranges (Juvenile → … → Foreman, mine-flavored).
-3. **Ranked duels** — 1v1 queue with ELO/Glicko-lite, seasonal ladder (VIPER's
-   Iron→Marshal equivalent), unranked FFA stays the default first experience.
+3. **Ranked duels** — 1v1 queue with ELO/Glicko-lite, seasonal ladder, unranked FFA stays the default first
+   experience. **Rank titles: Battlestar Galactica Colonial Fleet** (owner
+   decision 2026-10-18): Nugget → Ensign → Lieutenant JG → Lieutenant →
+   Captain → Major → Colonel → Commander → Admiral; the season's #1 also
+   holds the **CAG** title. So say we all.
    Requires: match-report protocol (server → DB), queue in memory (Redis only when
    multi-server), 5-min timeout + bot forfeit.
 4. **Leaderboards** — all-time / weekly / daily; per-ship and per-map cuts; the daily
    table doubles as the hook for #5.
-5. **Daily challenge** — a seeded daily scenario (survival wave or score-vs-bots on the
-   daily seed; the deterministic sim makes seeds shareable and fair). This is the
-   retention feature with the best effort-to-payoff ratio in VIPER's whole shell.
+5. **Daily challenge — rotating modes** (owner decision 2026-10-18): the daily
+   seed picks from a mode rotation — Survival (outlast waves), Score Attack
+   (orange-hoard vs bots on the seed), Mine Run (time-trial through
+   Hollowdeep checkpoints). Deterministic sim makes every seed shareable,
+   fair, and leaderboard-able. Best effort-to-payoff ratio in the shell.
 6. **Presence counters** — "N pilots online, M in matches" on the menu. Trivial over
    WS, huge social proof, and it feeds our scale telemetry.
 7. **"How it's made" notes** — dev-notes section on the domain. VIPER's notes page is
@@ -124,8 +143,10 @@ build; conventional commits; release tags + changelog.
 alien-agenda's EPYC box (64 cores — the sim farm's natural home; balance runs are
 batch and offline) with kestrel/baby handling triage ping duty. Work agents, not the
 personal fam — same Slack-connected pattern as the project-orange-red-team amendment,
-same approval rails. Queue the factory's own work in **beads** (per-repo Dolt task
-board; we've already scoped it) so factory state is visible in the repo it serves.
+same approval rails. The factory's own work is queued in **beads** — initialized 2026-10-18: the
+board lives in `refs/dolt/data` on this repo's origin (Dolt remote = git
+origin, verified pushed), 13 backlog beads seeded from this plan, `bd
+bootstrap` on any fresh clone, `bd ready --claim` is the agents' intake.
 
 **Community surface:** a Discord (or GitHub Discussions first — fewer surfaces to
 moderate at launch), the notes page, and one good launch post (r/WebGames,
