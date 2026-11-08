@@ -274,6 +274,8 @@ async function boot(): Promise<void> {
     const src = new OnlineSource(arena, input, settings.name || 'Pilot', cls, {
       makeTransport: () => new WsTransport(wsUrl(region.origin, code!, kind === 'private', settings.arena)),
       offline: false,
+      token: settings.token || undefined,
+      onToken: (t) => { settings.token = t; saveSettings(); },
       onStatus: statusMessage,
       resolveArena: arenaById,
     });

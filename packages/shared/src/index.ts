@@ -31,6 +31,7 @@ export * from './bots/nav.js';
 export * from './pickups.js';
 export * from './powerups.js';
 export * from './match.js';
+export * from './report.js';
 export * from './game.js';
 export * from './net/quantize.js';
 export * from './net/codec.js';

@@ -31,6 +31,10 @@ export interface OnlineOptions {
   makeTransport: () => Transport;
   /** offline worker: no reconnection, pause allowed */
   offline: boolean;
+  /** persisted identity token from a previous session, sent with hello */
+  token?: string;
+  /** called with the (possibly new) token on welcome — persist it */
+  onToken?: (token: string) => void;
   onStatus?: (s: NetStatus, detail?: string) => void;
   /** map id from the welcome → arena; without it the client stays on the arena it was built with */
   resolveArena?: (id: string) => ArenaData;
@@ -93,6 +97,7 @@ export class OnlineSource implements ViewSource {
   ) {
     this.online = !opts.offline;
     this.pendingClass = cls;
+    this.token = opts.token ?? '';
     this.predictor = new Predictor(arena);
     this.localView = this.blankView(-1, true);
     this.transport = this.open();
@@ -162,6 +167,7 @@ export class OnlineSource implements ViewSource {
         this.predictor.shipId = m.shipId;
         this.predictor.resetEnvClock();
         this.token = m.token;
+        this.opts.onToken?.(m.token);
         this.roomId = m.roomId;
         this.clock.seed(m.tick);
         this.pingsSent = 0;

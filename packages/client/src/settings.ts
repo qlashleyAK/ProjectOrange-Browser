@@ -29,6 +29,8 @@ export interface Settings {
   thirdPerson: boolean;
   /** map for practice, new private rooms and quick play */
   arena: string;
+  /** anonymous identity token from the last welcome — keeps your pilot across visits */
+  token: string;
 }
 
 const DEFAULTS: Settings = {
@@ -58,6 +60,7 @@ const DEFAULTS: Settings = {
   firstVisit: true,
   thirdPerson: true,
   arena: 'hollowdeep',
+  token: '',
 };
 
 const KEY = 'orange.settings.v1';
@@ -79,6 +82,6 @@ export function saveSettings(): void {
 }
 export function onSettings(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); }
 export function resetSettings(): void {
-  Object.assign(settings, DEFAULTS, { name: settings.name, firstVisit: false });
+  Object.assign(settings, DEFAULTS, { name: settings.name, token: settings.token, firstVisit: false });
   saveSettings();
 }

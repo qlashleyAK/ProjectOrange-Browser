@@ -15,6 +15,7 @@ import {
 } from '../net/codec.js';
 import type { ClientMsg, PickupInfo, RosterEntry, ServerMsg } from '../net/messages.js';
 import { powerupFlags, powerupIndex, powerupInfo, powerupLeft } from '../powerups.js';
+import { buildMatchReport, type MatchSink } from '../report.js';
 import { hash32 } from '../rng.js';
 
 /** Transport-agnostic connection (WebSocket on the server, MessagePort in the offline worker). */
@@ -52,6 +53,8 @@ export interface RoomOptions {
   arena?: string;
   /** move to the next map after every match (default true) */
   rotation?: boolean;
+  /** receives the MatchReport of every finished match (server-side persistence) */
+  sink?: MatchSink;
   now?: () => number;
   log?: (msg: string) => void;
 }
@@ -80,6 +83,7 @@ export class GameRoom {
   private lastMatchAt = 0;
   private lastPickupsAt = 0;
   private lastPhase = '';
+  private sink?: MatchSink;
   private writer = new Writer(4096);
   paused = false;
   lastHumanAt: number;
@@ -91,6 +95,7 @@ export class GameRoom {
     this.offline = !!o.offline;
     this.now = o.now ?? (() => performance.now());
     this.log = o.log ?? (() => {});
+    this.sink = o.sink;
     this.sim = new GameSim({
       seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline,
       botSkill: o.botSkill ?? 'normal', arena: arenaById(o.arena ?? DEFAULT_ARENA),
@@ -300,7 +305,8 @@ export class GameRoom {
     const events = this.sim.drainEvents();
     const json: GameEvent[] = [];
     for (const e of events) {
-      if (e.t === 'projSpawn') {
+      if (e.t === 'matchEnd') this.reportMatch();
+      else if (e.t === 'projSpawn') {
         this.projSpawns.push({ id: e.id, owner: e.ownerId, weapon: primaryIndex(e.weapon), pos: e.pos, vel: e.vel, spawnTick: e.spawnTick, shotId: e.shotId, index: e.index });
       } else if (e.t === 'projEnd') {
         this.projEnds.push({ id: e.id, reason: END_REASONS.indexOf(e.reason), pos: e.pos });
@@ -444,5 +450,19 @@ export class GameRoom {
       id: this.id, arena: this.sim.arena.blueprint.id, humans: this.humans, participants: this.participants, tick: this.sim.tick,
       tickMs: this.tickMs, private: this.isPrivate,
     };
+  }
+
+  /** Hand the finished match to the sink (persistence). A failing sink must never kill the room. */
+  private reportMatch(): void {
+    if (!this.sink) return;
+    try {
+      const tokenOf = (shipId: number): string | null => {
+        for (const c of this.byToken.values()) if (c.shipId === shipId && c.connected) return c.token;
+        return null;
+      };
+      this.sink.onMatchEnd(buildMatchReport(this.sim, { roomId: this.id, mode: this.offline ? 'offline' : 'ffa', tokenOf }));
+    } catch (e) {
+      this.log(`room ${this.id}: match sink failed (${String(e)})`);
+    }
   }
 }

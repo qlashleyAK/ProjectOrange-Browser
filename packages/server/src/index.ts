@@ -3,10 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, type ClientLink } from '@orange/shared';
+import { arenaInfo, BUILD_VERSION, DEFAULT_ARENA, GameRoom, initPhysics, isArenaId, type ClientLink, type MatchReport } from '@orange/shared';
+import { MatchStore, openDb } from './db.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
 const REGION = process.env.REGION ?? 'local';
+const DB_PATH = process.env.ORANGE_DB ?? 'data/orange.db';
 const DEFAULT_ROOM_ARENA = isArenaId(process.env.ARENA) ? process.env.ARENA : DEFAULT_ARENA;
 const ROOM_IDLE_MS = 60_000;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -15,13 +17,27 @@ const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '../../client/di
 const rooms = new Map<string, GameRoom>();
 let roomCounter = 0;
 
+const store = DB_PATH === 'none' ? null : new MatchStore(openDb(DB_PATH));
+const sink = store
+  ? {
+      onMatchEnd(r: MatchReport): void {
+        try {
+          store.recordMatch(r);
+          log(`room ${r.roomId}: match #${r.matchNumber} recorded (${r.mode}, ${r.players.length} players, winner ${r.winnerPlayerId ?? 'none'})`);
+        } catch (e) {
+          log(`room ${r.roomId}: match record failed (${String(e)})`);
+        }
+      },
+    }
+  : undefined;
+
 function log(msg: string): void { console.log(`[${new Date().toISOString()}] ${msg}`); }
 
 /** The arena only picks where a new room's rotation starts; joiners get whatever map the room is on. */
 function getRoom(id: string, isPrivate: boolean, arena = DEFAULT_ROOM_ARENA): GameRoom {
   let r = rooms.get(id);
   if (!r) {
-    r = new GameRoom({ id, isPrivate, arena, log });
+    r = new GameRoom({ id, isPrivate, arena, log, sink });
     r.start();
     rooms.set(id, r);
     log(`room ${id} created (${isPrivate ? 'private' : 'public'}, ${arenaInfo(arena).name})`);
@@ -86,6 +102,25 @@ async function main(): Promise<void> {
     if (url.pathname === '/status') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ version: BUILD_VERSION, rooms: [...rooms.values()].map((r) => r.stats()) }));
+      return;
+    }
+    if (store && url.pathname === '/api/leaderboard') {
+      const w = url.searchParams.get('window') ?? 'week';
+      const windowS = w === 'day' ? 86400 : w === 'alltime' ? 0 : 604800;
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ window: w, rows: store.leaderboard(windowS, limit) }));
+      return;
+    }
+    if (store && url.pathname === '/api/recent') {
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') ?? 20)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ matches: store.recentMatches(limit) }));
+      return;
+    }
+    if (store && url.pathname === '/api/daily') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(store.dailySeed(new Date().toISOString().slice(0, 10))));
       return;
     }
     serveStatic(req, res, url.pathname);
