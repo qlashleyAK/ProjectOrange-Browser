@@ -1875,6 +1875,10 @@ Sound list:
 
 ## 20. Decisions (defaults chosen; owner may override)
 
+> **[RATIFIED 2026-11-08]** — owner reviewed all 19 defaults as shipped in
+> build 0.2.0 (staging, sfo3) and signed off: defaults stand. Overrides come
+> as new numbered entries here.
+
 | # | Topic | Default |
 |---|---|---|
 | 1 | Shield regeneration | On, per-class delay/rate (Section 5.2). The hull never regenerates. |
