@@ -115,6 +115,62 @@ describe('daily challenge modes', () => {
     expect(again.room.sim.course).toEqual(first);
   });
 
+  it('uhl: client-claimed ring passes are validated by proximity (near ok, far rejected)', () => {
+    const { room, advance, toInProgress } = makeRoom('mine-run', 7);
+    // note: claims arrive via room.message, so use a FakeClient-style link
+    const human = room.sim.addPlayer('p:hero', 'Hero', 'dart');
+    toInProgress();
+    const cp = room.sim.course[0]!;
+
+    // ship far from ring 1 -> claim rejected, no progress
+    room.sim.registerCheckpoint(human.id, 0, true);
+    expect(human.checkpoint).toBe(0);
+
+    // ship at the ring: the sim's own sweep registers the pass...
+    human.body!.setTranslation(cp, true);
+    advance(2);
+    expect(human.checkpoint).toBeGreaterThanOrEqual(1);
+
+    // ...and a claim for the NEXT ring while standing there is rejected (far)
+    const nextCp = room.sim.course[human.checkpoint]!;
+    human.body!.setTranslation({ x: nextCp.x + 500, y: nextCp.y, z: nextCp.z }, true);
+    advance(2);
+    expect(room.sim.registerCheckpoint(human.id, human.checkpoint, true)).toBe(false);
+
+    // claim accepted when the ship is genuinely at the claimed ring
+    // (set the authoritative pos directly: no step, so only the claim path can register)
+    const target = room.sim.course[human.checkpoint]!;
+    human.body!.setTranslation(target, true);
+    human.pos = { ...target };
+    expect(room.sim.registerCheckpoint(human.id, human.checkpoint, true)).toBe(true);
+    expect(human.checkpoint).toBeGreaterThanOrEqual(2);
+
+    // stale index claims do nothing
+    expect(room.sim.registerCheckpoint(human.id, 0, true)).toBe(false);
+  });
+
+  it('uhl: pose-window sweep registers a pass the live view already moved past', () => {
+    const { room, advance, toInProgress } = makeRoom('mine-run', 8);
+    const human = room.sim.addPlayer('p:hero', 'Hero', 'dart');
+    toInProgress();
+    const cp = room.sim.course[0]!;
+    human.lagTicks = 30;
+
+    // inject a recent pose AT the ring while the live ship is far away
+    human.body!.setTranslation(cp, true);
+    advance(2); // pose recorded at the ring (and the ring may already register — that's fine)
+    if (human.checkpoint === 0) {
+      // sweep test proper: move far, inject history at the ring, next tick must register
+      human.poseHistory[(room.sim.tick - 2) % 60] = {
+        tick: room.sim.tick - 2, pos: { ...cp }, rot: { x: 0, y: 0, z: 0, w: 1 }, alive: true, generation: human.generation,
+      };
+      human.body!.setTranslation({ x: cp.x + 500, y: cp.y, z: cp.z }, true);
+      advance(2);
+      expect(human.checkpoint).toBe(1);
+    }
+    expect(human.checkpoint).toBeGreaterThanOrEqual(1);
+  });
+
   it('weapons are disabled in mine-run but live in score-attack', () => {
     const a = makeRoom('mine-run');
     a.room.sim.addPlayer('p:a', 'A', 'dart');

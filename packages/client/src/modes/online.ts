@@ -1,5 +1,5 @@
 import {
-  BUILD_VERSION, castStatic, CLASS_LIST, classByIndex, DT, encodeInputPacket, encodePing, END_REASONS, INPUT_SEND_HZ,
+  BUILD_VERSION, castStatic, CHECKPOINT_RADIUS, CLASS_LIST, classByIndex, DT, encodeInputPacket, encodePing, END_REASONS, INPUT_SEND_HZ,
   INPUT_BUFFER_TARGET_MAX, MAX_INPUTS_PER_PACKET, MsgType, PRIMARY_TABLE, quantizeInput, Reader, decodeSnapshot, resolveTier,
   RESPAWN_DELAY_S, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, safeZoneAt, ShipFlag, TIME_DILATION, activePrimary, powerupFromFlags, v3, q4,
   type ArenaData, type ClassId, type ClientMsg, type GameEvent, type GameMode, type InputCmd, type MatchPhase, type OwnerSnap, type PickupInfo,
@@ -80,6 +80,8 @@ export class OnlineSource implements ViewSource {
   private pickupMap = new Map<number, PickupInfo>();
   private powerupState: PowerupInfo = { live: null, next: null };
   private rosterList: RosterEntry[] = [];
+  /** mine-run: last checkpoint index claimed this match (-1 = none); claims are one-shot per ring */
+  private cpClaimed = -1;
   private matchState = { phase: 'waiting' as MatchPhase, phaseEndTick: 0, winnerId: -1, startTick: 0 };
   private nextArena: string | null = null;
   private mode: GameMode = 'ffa';
@@ -181,7 +183,10 @@ export class OnlineSource implements ViewSource {
         break;
       case 'reload': this.setStatus('reload', m.version); break;
       case 'full': this.setStatus('full'); break;
-      case 'roster': this.rosterList = m.players; break;
+      case 'roster':
+        this.rosterList = m.players;
+        { const me = this.rosterList.find((e) => e.id === this.shipId); if (me && me.checkpoint > this.cpClaimed) this.cpClaimed = me.checkpoint; }
+        break;
       case 'match': {
         if (m.arena) this.switchArena(m.arena);
         this.nextArena = m.nextArena ?? null;
@@ -357,6 +362,21 @@ export class OnlineSource implements ViewSource {
     }
     this.alpha = Math.min(1, this.acc / DT);
     this.predictor.decay(dt);
+
+    // mine-run: ring pass seen from OUR predicted position — the server may
+    // have replayed a different line at this ping, so tell it what we saw
+    // (it validates proximity before accepting; claims are one-shot per ring)
+    if (this.mode === 'mine-run' && this.course.length) {
+      const me = this.rosterList.find((e) => e.id === this.shipId);
+      if (me && me.checkpoint < this.course.length && me.checkpoint !== this.cpClaimed) {
+        const cp = this.course[me.checkpoint]!;
+        const p = this.predictor.pos;
+        if ((p.x - cp.x) ** 2 + (p.y - cp.y) ** 2 + (p.z - cp.z) ** 2 <= CHECKPOINT_RADIUS * CHECKPOINT_RADIUS) {
+          this.cpClaimed = me.checkpoint;
+          this.sendJson({ t: 'cp', index: me.checkpoint });
+        }
+      }
+    }
 
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / INPUT_SEND_HZ || this.pending.length >= MAX_INPUTS_PER_PACKET) {

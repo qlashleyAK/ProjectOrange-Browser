@@ -11,10 +11,10 @@ import { NavGraph } from './bots/nav.js';
 import { botCanSee, cloakVisible } from './bots/perception.js';
 import { CLASSES, CLASS_IDS, type ClassId, type PrimaryDef } from './classes/index.js';
 import {
-  CHECKPOINT_RADIUS, DT, MAX_PARTICIPANTS, MAX_POWER, MINE_RUN_CHECKPOINTS, RESPAWN_DELAY_S, SURVIVAL_WAVE_BASE, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
+  CHECKPOINT_RADIUS, DT, MAX_PARTICIPANTS, POSE_HISTORY_TICKS, MAX_POWER, MINE_RUN_CHECKPOINTS, RESPAWN_DELAY_S, SURVIVAL_WAVE_BASE, RESPAWN_HOLD_MAX_S, SAFE_ZONE_CHARGE_S, SPAWN_PROTECTION_S, WARMUP_OFFLINE_S, WARMUP_S,
   stepSafeCharge,
 } from './constants.js';
-import { recordPose } from './combat/hitVolumes.js';
+import { poseAt, recordPose } from './combat/hitVolumes.js';
 import { endMissile, launchSecondary, updateLock, updateMissiles } from './combat/missiles.js';
 import { endProjectile, updateProjectiles } from './combat/projectiles.js';
 import { firePrimary } from './combat/weapons.js';
@@ -395,6 +395,50 @@ export class GameSim {
     return course;
   }
 
+  /** mine-run: was the ship inside the checkpoint radius recently (its own lag window)? */
+  private passedLately(s: Ship, cp: V3): boolean {
+    const within = (p: { x: number; y: number; z: number }): boolean =>
+      (p.x - cp.x) ** 2 + (p.y - cp.y) ** 2 + (p.z - cp.z) ** 2 <= CHECKPOINT_RADIUS * CHECKPOINT_RADIUS;
+    if (within(s.pos)) return true;
+    // the pilot may have passed the ring between the server's live view and
+    // their own (delayed) one — sweep the ship's lag window of recorded poses
+    const sweep = Math.min(POSE_HISTORY_TICKS - 1, s.lagTicks + 8);
+    for (let t = this.tick - sweep; t < this.tick; t++) {
+      const p = poseAt(s, t);
+      if (p && within(p.pos)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * mine-run: register a checkpoint pass. `claimed` = the pilot's client saw the
+   * pass (prediction can diverge from the server's replay at high ping) — trust
+   * but verify: the server's own recent poses must at least be near the ring
+   * (2.5x radius reach), so a claim can't teleport anyone through the course.
+   */
+  registerCheckpoint(shipId: number, index: number, claimed = false): boolean {
+    const s = this.ships.get(shipId);
+    if (!s || !s.alive || this.mode !== 'mine-run' || index !== s.checkpoint || index >= this.course.length) return false;
+    if (claimed) {
+      const cp = this.course[index]!;
+      const reach = CHECKPOINT_RADIUS * 2.5;
+      const near = (p: { x: number; y: number; z: number }): boolean =>
+        (p.x - cp.x) ** 2 + (p.y - cp.y) ** 2 + (p.z - cp.z) ** 2 <= reach * reach;
+      let ok = near(s.pos);
+      if (!ok) {
+        for (let t = this.tick - Math.min(POSE_HISTORY_TICKS - 1, s.lagTicks + 8); t < this.tick; t++) {
+          const p = poseAt(s, t);
+          if (p && near(p.pos)) { ok = true; break; }
+        }
+      }
+      if (!ok) return false;
+    }
+    s.checkpoint++;
+    this.emit({ t: 'checkpoint', shipId: s.id, index: s.checkpoint, total: this.course.length, pos: { ...this.course[index]! } });
+    if (s.checkpoint >= this.course.length) s.courseDoneTick = this.tick;
+    return true;
+  }
+
   /** survival: spawn the next wave — bots die for good, skill ramps with the wave count. */
   spawnWave(): void {
     this.wave++;
@@ -469,17 +513,11 @@ export class GameSim {
       if (this.tick >= s.respawnAt && (!s.holdSpawn || holdOver)) this.spawnShip(s);
     }
 
-    // mine-run: checkpoint pass-through
+    // mine-run: checkpoint pass-through (lag-compensated via the pose window)
     if (this.mode === 'mine-run' && this.course.length) {
       for (const s of this.shipList) {
         if (!s.alive || s.checkpoint >= this.course.length) continue;
-        const cp = this.course[s.checkpoint]!;
-        const dx = s.pos.x - cp.x, dy = s.pos.y - cp.y, dz = s.pos.z - cp.z;
-        if (dx * dx + dy * dy + dz * dz <= CHECKPOINT_RADIUS * CHECKPOINT_RADIUS) {
-          s.checkpoint++;
-          this.emit({ t: 'checkpoint', shipId: s.id, index: s.checkpoint, total: this.course.length, pos: { ...cp } });
-          if (s.checkpoint >= this.course.length) s.courseDoneTick = this.tick;
-        }
+        if (this.passedLately(s, this.course[s.checkpoint]!)) this.registerCheckpoint(s.id, s.checkpoint);
       }
     }
 

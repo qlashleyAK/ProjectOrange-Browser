@@ -94,6 +94,8 @@ export class GameRoom {
   private lastMatchAt = 0;
   private lastPickupsAt = 0;
   private lastPhase = '';
+  /** mine-run claims rejected by proximity validation (telemetry for the factory) */
+  cpRejects = 0;
   private sink?: MatchSink;
   private writer = new Writer(4096);
   paused = false;
@@ -228,6 +230,12 @@ export class GameRoom {
         break;
       case 'hold':
         if (c.shipId >= 0) this.sim.setSpawnHold(c.shipId, !!m.hold);
+        break;
+      case 'cp':
+        // mine-run claim: the client SAW a ring pass — the sim verifies proximity
+        if (c.shipId >= 0 && this.sim.mode === 'mine-run' && !this.sim.registerCheckpoint(c.shipId, Number(m.index), true)) {
+          this.cpRejects++;
+        }
         break;
       case 'pause':
         if (this.offline) this.paused = !!m.on;

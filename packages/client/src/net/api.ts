@@ -20,6 +20,12 @@ export interface DailyRow { handle: string; score: number; kills: number; deaths
 export interface PresenceCounts { online: number; inMatch: number; onMenu: number; rooms: number }
 export interface DailyInfo { date: string; mode: string; seed: number }
 
+export interface RankedStatus {
+  status: 'queued' | 'matched'; position?: number; elo?: number;
+  room?: string; opponent?: string; opponentElo?: number;
+}
+export interface RankRow { handle: string; elo: number; rank: string; duels: number; wins: number }
+
 async function request<T>(url: string, init: RequestInit = {}, timeoutMs = 5000): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -46,6 +52,13 @@ export function serverApi(origin: string) {
     daily: () => request<DailyInfo>(`${origin}/api/daily`),
     dailyLeaderboard: (date: string, limit = 25) =>
       request<{ rows: DailyRow[] }>(`${origin}/api/daily/leaderboard?date=${encodeURIComponent(date)}&limit=${limit}`).then((r) => r.rows),
+    /** text/plain POST body: no CORS preflight (same trick as profile), JSON inside */
+    rankedJoin: (token: string, handle: string) =>
+      request<RankedStatus>(`${origin}/api/ranked`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ token, handle }) }),
+    rankedLeave: (token: string) =>
+      request<{ ok: boolean }>(`${origin}/api/ranked/leave`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ token }) }),
+    ranks: (limit = 25) =>
+      request<{ rows: RankRow[] }>(`${origin}/api/ranks?limit=${limit}`).then((r) => r.rows),
   };
 }
 

@@ -7,6 +7,8 @@ export interface MainMenuActions {
   quickPlay: () => void;
   /** join today's daily challenge room */
   daily: () => void;
+  /** a duel was found — join its room */
+  rankedFound: (room: string) => void;
   practice: () => void;
   createPrivate: () => void;
   joinPrivate: (code: string) => void;
@@ -146,7 +148,7 @@ export class Menu {
     button(list, 'Quick Match', this.regionText || 'Join the fullest public match', () => { commit(); a.quickPlay(); }, !roomFromUrl);
     const today = todayChallenge();
     button(list, 'Daily challenge', `${DAILY_MODES[today.mode]} — ${DAILY_BLURB[today.mode]} · same seed for everyone today`, () => { commit(); a.daily(); });
-    button(list, 'Ranked', '1v1 duels · rank ladder · season 1', () => { commit(); this.showRanked(toMain); });
+    button(list, 'Ranked', '1v1 duels · rank ladder · season 1', () => { commit(); this.showRanked(a, toMain); });
     button(list, 'Practice vs bots', `Starts on ${map.name} · offline · ${settings.botSkill} bots · pausable`, () => { commit(); a.practice(); });
     button(list, 'Private match', `Starts on ${map.name} · create a room or join by code`, () => { commit(); this.showPrivate(a, toMain); });
     const more = h('div', 'btn-row', p);
@@ -187,14 +189,74 @@ export class Menu {
     button(p, 'Back', '', back);
   }
 
-  showRanked(back: () => void): void {
+  showRanked(a: MainMenuActions, back: () => void): void {
     const p = this.open('ranked');
     this.back = back;
     h('h2', '', p, 'RANKED');
-    h('div', 'sub', p, 'One on one, best pilot wins. A rating ladder with seasons — the season\'s #1 holds the CAG title.');
+    h('div', 'sub', p, 'One on one, first to 12 kills. A rating ladder with seasons — the season\'s #1 holds the CAG title.');
     h('div', 'ranks', p, RANKS.map((r) => `<span>${esc(r)}</span>`).join('<i>›</i>'));
-    h('div', 'sub', p, 'The duel queue opens with season 1. Until then, Quick Match and the leaderboards are where reputations are made.');
-    button(p, 'Back', '', back, true);
+
+    const api = a.api();
+    const status = h('div', 'sub', p, '');
+    const pollNote = h('div', 'sub', p, '');
+    let searching = false;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const stopPolling = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    // the menu only keeps one screen: stop as soon as this one is gone
+    const alive = () => !cancelled && this.screen === 'ranked';
+
+    const poll = async () => {
+      if (!alive() || !api) return;
+      try {
+        const r = await api.rankedJoin(settings.token || `anon-${Math.random().toString(36).slice(2, 10)}`, settings.name || 'Pilot');
+        if (!alive()) return;
+        if (r.status === 'matched' && r.room) {
+          stopPolling();
+          status.innerHTML = `Opponent found: <b>${esc(r.opponent ?? '?')}</b> — entering the arena…`;
+          a.rankedFound(r.room);
+          return;
+        }
+        status.innerHTML = `Searching for an opponent… <b>${r.position ?? 1}</b> in queue · your rating: <b>${r.elo ?? 1200}</b>`;
+      } catch {
+        if (alive()) status.innerHTML = 'Queue unavailable — the duel service is offline. Try again shortly.';
+      }
+      if (alive()) { pollNote.textContent = 'The queue times out after 2 idle minutes; leave and rejoin to re-enter.'; timer = setTimeout(poll, 2500); }
+    };
+
+    const findBtn = button(p, 'Find a duel', 'Join the queue · matched by rating when a pilot is waiting', () => {
+      if (searching || !api) return;
+      searching = true;
+      findBtn.disabled = true;
+      findBtn.textContent = 'SEARCHING…';
+      cancelBtn.classList.remove('hidden');
+      status.textContent = 'Joining the queue…';
+      void poll();
+    }, true);
+
+    const cancelBtn = button(p, 'Leave the queue', '', () => {
+      cancelled = true;
+      stopPolling();
+      void api?.rankedLeave(settings.token).catch(() => {});
+      this.showRanked(a, back); // reset the screen
+    });
+    cancelBtn.classList.add('hidden');
+
+    // the ladder
+    const board = h('div', 'board', p, '<div class="sub">Loading the ladder…</div>');
+    if (api) {
+      api.ranks(20).then((rows) => {
+        if (!alive()) return;
+        board.innerHTML = rows.length
+          ? rows.map((r, i) => `<div class="lb-row${r.handle === (settings.name || 'Pilot') ? ' me' : ''}"><span class="lb-rank">${i + 1}</span><span class="lb-name">${esc(r.handle)}</span><span class="lb-rank-name">${esc(r.rank)}</span><span class="lb-num">${r.elo}</span><span class="lb-num">${r.wins}/${r.duels}</span></div>`).join('')
+          : '<div class="sub">No duels fought yet — the first CAG in history is still up for grabs.</div>';
+      }).catch(() => { if (alive()) board.innerHTML = '<div class="sub">The ladder is offline.</div>'; });
+    } else {
+      board.innerHTML = '<div class="sub">Ranked needs the game server. Practice vs bots works offline.</div>';
+    }
+
+    button(p, 'Back', '', () => { cancelled = true; stopPolling(); void api?.rankedLeave(settings.token).catch(() => {}); back(); }, true);
   }
 
   showLeaderboards(a: MainMenuActions, back: () => void, win: BoardTab = 'week'): void {

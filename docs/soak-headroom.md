@@ -49,10 +49,28 @@ the avg column.
 - **Ops rule of thumb for launch:** cap rooms per process at 50, expose the
   room count in telemetry, alert at 40.
 
+## Droplet re-run (2026-11-08, `v5r` — sfo3 s-1vcpu-2gb, shared vCPU, live server running concurrently)
+
+| Arena | avg ms/tick | worst | vs idle-container baseline |
+|---|---|---|---|
+| Hollowdeep | 2.46 | 63.0 | ~4x |
+| The Gyre | 2.09 | 40.5 | ~4x |
+| Meridian Tower | 2.41 | 60.8 | ~5x |
+| Gloamwood | 3.11 | 124.1 | ~4x |
+
+These are **worst-case honest**: shared-vCPU droplet (~2-3x slower single-thread
+than the container baseline host) WITH the live game server competing for the
+single core. The ops-relevant number remains the live load test — real rooms
+with netcode ticked at 1.5-2.3 ms on this same box at 12 rooms / 64 humans.
+But the 40-124 ms worst-ticks under saturation say: **keep the per-process room
+cap conservative on this tier** (the 40-60 room figure was for 4 vCPU; on 1
+shared vCPU, treat ~8-12 rooms as the comfort zone, which the load test
+confirmed empirically). If Gloamwood's worst spikes matter in production,
+that's the signal to move to a dedicated-CPU tier, not to tune the sim.
+
 ## Follow-ups
 
-- Re-run this file's table on the droplet, replace numbers, keep the file as
-  the launch reference (bead: created).
+- [x] Re-run on the droplet — done 2026-11-08 (section above, `v5r`).
 - Real-server load test: N synthetic clients over WS against the deployed
   server to capture GameRoom/netcode overhead the offline sim doesn't include
   (bead: created).

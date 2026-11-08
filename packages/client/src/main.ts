@@ -201,6 +201,7 @@ async function boot(): Promise<void> {
       practice: () => startPractice(),
       createPrivate: () => void startOnline('private', randomCode()),
       joinPrivate: (code) => void startOnline('private', code),
+      rankedFound: (room) => void startOnline('private', room),
       mapChanged: (id) => useArena(arenaById(id)),
       api: () => (bestRegion ? serverApi(bestRegion.origin) : null),
     }, urlRoom);

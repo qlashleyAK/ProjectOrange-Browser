@@ -19,7 +19,9 @@ export interface PowerupInfo { live: { id: number; kind: PowerupKind; pos: V3 } 
 export type ClientMsg =
   | { t: 'hello'; name: string; classId: ClassId; version: string; token?: string }
   | { t: 'class'; classId: ClassId }
-  | { t: 'hold'; hold: boolean };
+  | { t: 'hold'; hold: boolean }
+  /** mine-run: the pilot's client SAW itself pass checkpoint `index` (server validates) */
+  | { t: 'cp'; index: number };
 
 export type ServerMsg =
   | { t: 'welcome'; shipId: number; token: string; tick: number; roomId: string; version: string; arena: string }
