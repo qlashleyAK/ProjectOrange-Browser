@@ -1,8 +1,11 @@
 # Staging runbook — orange-staging droplet
 
-**Live since:** 2026-11-08 · **URL:** https://staging.projectorange.nexus
-(Cloudflare-proxied, edge TLS; origin Caddy self-signed on 443 under zone SSL
-mode Full. Direct IP http://45.55.189.32 still works for debugging.)
+**Live since:** 2026-11-08 · **Game URL:** https://projectorange.nexus
+(2026-11-08: root tunnel route replaced with a proxied A record to this box,
+owner-approved; the old cfargotunnel demo stays in the CF account, unrouted.)
+Debug URL: https://staging.projectorange.nexus · direct IP http://45.55.189.32.
+Cloudflare-proxied, edge TLS; origin Caddy self-signed on 443 under zone SSL
+mode Full.
 **Droplet:** `617032671` · orange-staging · nyc3 · `s-1vcpu-2gb` (~$12/mo) · Ubuntu 24.04
 **Tags:** `orange-staging` `dzhopa-dream` `destroyable`
 **SSH key:** `dzhopa-dream-orange-staging` (ed25519) in the DO account; private half
@@ -52,8 +55,8 @@ repo or any token. (Repo goes public before launch anyway, but keep the habit.)
 ## Open follow-ups
 
 - [x] staging.projectorange.nexus → this box (Cloudflare proxied, 2026-11-08).
-      Root projectorange.nexus still routes to the old demo Worker
-      (demo-game-001) — replacing it is an owner decision, pending.
+- [x] projectorange.nexus root → this box (replaced the cfargotunnel demo
+      route, owner-approved 2026-11-08). demo-game-001 subdomain untouched.
 - [ ] Origin TLS hardening: swap Caddy self-signed for a CF Origin CA cert
       (enables Full (strict)).
 - [ ] Soak-headroom re-run on this droplet (`v5r`): the box has no source checkout
