@@ -15,6 +15,10 @@ const skill = (process.argv[3] ?? 'normal') as BotSkill;
 const arenaId = process.argv[4] ?? 'hollowdeep';
 const rotate = arenaId === 'rotation';
 if (!rotate && !isArenaId(arenaId)) { console.error(`unknown arena ${arenaId}`); process.exit(1); }
+// Fail loudly on a bad skill instead of crashing deep in the first bot's
+// steering: SKILLS[bad] is undefined and the error is mysterious.
+const VALID_SKILLS: readonly BotSkill[] = ['easy', 'normal', 'hard'];
+if (!VALID_SKILLS.includes(skill)) { console.error(`unknown skill ${JSON.stringify(String(skill))} (expected ${VALID_SKILLS.join(' | ')})`); process.exit(1); }
 
 await initPhysics();
 const sim = new GameSim({
