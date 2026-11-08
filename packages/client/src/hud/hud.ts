@@ -752,7 +752,7 @@ export class Hud {
     this.scoreboard.classList.toggle('hidden', !show);
     if (!show) return;
     const me = f.local?.shipId;
-    const daily = f.match.mode !== 'ffa';
+    const daily = isDaily(f.match.mode);
     const rows = sortRows(f.roster, f.match.mode);
     const html = `<div class="panel scoreboard"><h2>${daily ? MODE_INFO[f.match.mode].start : 'SCOREBOARD'}</h2><table><tr><th>Pilot</th><th>Ship</th>${daily ? '<th>Score</th>' : ''}<th>K</th><th>D</th><th>A</th><th>Power</th><th>Ping</th></tr>
       ${rows.map((r) => `<tr class="${r.id === me ? 'me' : ''}"><td style="color:${accentCss(r.accent)}">${esc(r.name)} ${r.isBot ? '<span class="bot">[BOT]</span>' : ''}${r.connected ? '' : ' <span class="bot">(reconnecting)</span>'}</td>
@@ -766,7 +766,7 @@ export class Hud {
     this.post.classList.toggle('hidden', !show);
     if (!show) return;
     const me = f.local?.shipId;
-    const daily = f.match.mode !== 'ffa';
+    const daily = isDaily(f.match.mode);
     const rows = sortRows(f.roster, f.match.mode);
     const winner = rows.find((r) => r.id === f.match.winnerId) ?? rows[0];
     const mine = rows.find((r) => r.id === me);
@@ -790,11 +790,15 @@ const MODE_INFO: Record<GameMode, { name: string; start: string; rule: string }>
   'score-attack': { name: 'Score Attack', start: 'SCORE ATTACK', rule: 'Kills 100 · assists 25 · oranges 10 — highest score in 5 minutes' },
   survival: { name: 'Survival', start: 'SURVIVAL', rule: 'Outlast the waves — no respawns' },
   'mine-run': { name: 'Mine Run', start: 'MINE RUN', rule: 'Fly the checkpoints in order — weapons offline' },
+  'ranked-duel': { name: 'Ranked duel', start: 'DUEL!', rule: `Ranked 1v1 · first to ${KILLS_TO_WIN} kills` },
 };
+
+/** Daily challenge modes rank on mode score; FFA and ranked duels rank on kills. */
+const isDaily = (mode: GameMode) => mode !== 'ffa' && mode !== 'ranked-duel';
 
 /** Daily modes rank on score; FFA on kills, then fewest deaths, then damage. */
 function sortRows(roster: RosterEntry[], mode: GameMode): RosterEntry[] {
-  return roster.slice().sort((a, b) => (mode === 'ffa' ? 0 : b.score - a.score) || b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage);
+  return roster.slice().sort((a, b) => (isDaily(mode) ? b.score - a.score : 0) || b.kills - a.kills || a.deaths - b.deaths || b.damage - a.damage);
 }
 
 function modeScoreLine(m: MatchView, me: RosterEntry, roster: RosterEntry[], leader: RosterEntry | undefined): string {

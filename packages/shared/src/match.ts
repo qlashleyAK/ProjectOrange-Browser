@@ -55,7 +55,9 @@ function setPhase(sim: GameSim, phase: MatchPhase, durationS: number): void {
 export function updateMatch(sim: GameSim): void {
   const m = sim.match;
   const n = sim.shipList.length;
-  const daily = sim.mode !== 'ffa';
+  // daily modes: 1-player start, 5-min clock, seeded layout, no rotation.
+  // ranked-duel uses the ffa clock/cap (12 kills or 6 min) with 2 players.
+  const daily = sim.mode !== 'ffa' && sim.mode !== 'ranked-duel';
   const minPlayers = daily ? 1 : 2;
   const duration = daily ? DAILY_MATCH_DURATION_S : MATCH_DURATION_S;
   switch (m.phase) {

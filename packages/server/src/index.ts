@@ -9,6 +9,7 @@ import {
 } from '@orange/shared';
 import { MatchStore, openDb } from './db.js';
 import { Presence } from './presence.js';
+import { RankedQueue, migrateRanked } from './ranked.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
 const REGION = process.env.REGION ?? 'local';
@@ -23,11 +24,28 @@ let roomCounter = 0;
 const presence = new Presence();
 
 const store = DB_PATH === 'none' ? null : new MatchStore(openDb(DB_PATH));
+if (store) migrateRanked((store as unknown as { db: import('node:sqlite').DatabaseSync }).db);
+
+/** Ranked-duel rooms: private 1v1, ranked mode, human cap 2. */
+function makeDuelRoom(): string {
+  const id = `RK${(++roomCounter).toString(36).toUpperCase()}`;
+  const r = new GameRoom({ id, isPrivate: true, mode: 'ranked-duel', log, sink });
+  r.start();
+  rooms.set(id, r);
+  log(`duel room ${id} created`);
+  return id;
+}
+
+const ranked = store
+  ? new RankedQueue((store as unknown as { db: import('node:sqlite').DatabaseSync }).db, () => makeDuelRoom())
+  : null;
+
 const sink = store
   ? {
       onMatchEnd(r: MatchReport): void {
         try {
-          store.recordMatch(r);
+          const matchId = store.recordMatch(r);
+          if (r.mode === 'ranked-duel' && ranked) ranked.applyDuel(r, matchId);
           log(`room ${r.roomId}: match #${r.matchNumber} recorded (${r.mode}, ${r.players.length} players, winner ${r.winnerPlayerId ?? 'none'})`);
         } catch (e) {
           log(`room ${r.roomId}: match record failed (${String(e)})`);
@@ -174,6 +192,36 @@ async function main(): Promise<void> {
       const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(store.dailySeed(date)));
+      return;
+    }
+    if (ranked && req.method === 'POST' && url.pathname === '/api/ranked') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try {
+          const { token, handle } = JSON.parse(body || '{}') as { token?: string; handle?: string };
+          if (!token) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'token required' })); return; }
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          res.end(JSON.stringify(ranked.join(token, String(handle ?? 'Pilot').slice(0, 16))));
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'bad json' }));
+        }
+      });
+      return;
+    }
+    if (ranked && req.method === 'POST' && url.pathname === '/api/ranked/leave') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try { ranked.leave((JSON.parse(body || '{}') as { token?: string }).token ?? ''); } catch { /* ignore */ }
+        res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+      });
+      return;
+    }
+    if (ranked && url.pathname === '/api/ranks') {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ rows: ranked.ladder(limit) }));
       return;
     }
     if (store && url.pathname === '/api/daily/leaderboard') {

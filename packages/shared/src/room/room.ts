@@ -53,8 +53,10 @@ export interface RoomOptions {
   arena?: string;
   /** seed for daily rooms — fixes the arena's random layout + bot spawns + course */
   seed?: number;
-  /** match mode: ffa default, or a daily challenge mode (survival / score-attack / mine-run) */
+  /** match mode: ffa default, a daily challenge mode, or ranked-duel */
   mode?: GameMode;
+  /** hard cap on human slots (ranked duels: 2) */
+  maxHumans?: number;
   /** move to the next map after every match (default true) */
   rotation?: boolean;
   /** receives the MatchReport of every finished match (server-side persistence) */
@@ -105,6 +107,7 @@ export class GameRoom {
     this.now = o.now ?? (() => performance.now());
     this.log = o.log ?? (() => {});
     this.sink = o.sink;
+    this.maxHumans = o.maxHumans ?? (o.mode === 'ranked-duel' ? 2 : MAX_PARTICIPANTS);
     this.sim = new GameSim({
       seed: o.seed ?? hash32(...[...o.id].map((c) => c.charCodeAt(0)), Date.now() & 0xffff), offline: this.offline,
       botSkill: o.botSkill ?? 'normal', arena: arenaById(o.arena ?? DEFAULT_ARENA),
@@ -120,11 +123,12 @@ export class GameRoom {
   /** humans with a live connection (excludes slots held for a reconnect) — the presence counter's "in matches" */
   get connectedHumans(): number { return this.sim.shipList.filter((s) => !s.isBot && s.connected).length; }
   get participants(): number { return this.sim.shipList.filter((s) => !s.removeAtDeath).length; }
-  get hasFreeSlot(): boolean { return this.humans < MAX_PARTICIPANTS; }
+  private maxHumans = MAX_PARTICIPANTS;
+  get hasFreeSlot(): boolean { return this.humans < this.maxHumans; }
 
   private backfill(): void {
-    // survival waves and mine-run courses manage their own populations
-    if (this.sim.mode === 'survival' || this.sim.mode === 'mine-run') return;
+    // survival waves, mine-run courses, and ranked duels manage their own populations
+    if (this.sim.mode === 'survival' || this.sim.mode === 'mine-run' || this.sim.mode === 'ranked-duel') return;
     // keep at least BOT_BACKFILL_TARGET participants; un-flag pending removals first
     let n = this.participants;
     for (const s of this.sim.shipList) {
