@@ -21,7 +21,7 @@ export interface SkillDef {
   lockPatience: number;
   turn: number; dodge: number;
 }
-/** Bots shoot like stormtroopers: lots of fire, mostly near misses, and the only way to get tagged is to fly straight and slow. */
+/** Near-miss aim: lots of fire, mostly near misses, and the only way to get tagged is to fly straight and slow. */
 export const SKILLS: Record<BotSkill, SkillDef> = {
   easy: { reaction: 0.7, scatter: 24, minScatter: 13, focusTime: 10, lead: [0.1, 1.1], missileGap: 22, lockPatience: 0.25, turn: 0.6, dodge: 0.1 },
   normal: { reaction: 0.45, scatter: 13, minScatter: 6, focusTime: 7, lead: [0.3, 1.15], missileGap: 15, lockPatience: 0.4, turn: 0.8, dodge: 0.35 },

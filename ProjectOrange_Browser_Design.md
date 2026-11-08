@@ -465,7 +465,7 @@ Arc Slug is a single heavy slug: 40 damage plus 3 m splash, 2.2 shots/s,
 of the aimed shot and within 260 m, the slug bends up to 6° onto them at
 the moment of firing — never mid-flight — forgiving imperfect lead
 without turning it into a dumb-fire missile. Bot slugs only snap onto other
-bots (see §11, *Stormtrooper aim*).
+bots (see §11, *Near-miss aim*).
 
 **Scythe**
 
@@ -929,8 +929,8 @@ Bots make the game alive with zero players online.
   - **Hunt:** pick a target by distance, low health, and **high power**
     (bounty). Navigate toward it.
   - **Engage:** hold a class-preferred range (Dart 60–200 m, Mule 15–80 m,
-    Scythe 150–400 m, Brute 80–300 m). Shoot like a stormtrooper (see
-    *Stormtrooper aim* below). Strafe perpendicular to the enemy's aim.
+    Scythe 150–400 m, Brute 80–300 m). Spray near misses (see
+    *Near-miss aim* below). Strafe perpendicular to the enemy's aim.
     Dodge when a projectile is about to hit.
   - **Collect:** chase oranges when no threat is near or an orange is much
     closer than any enemy. Always chase death drops after a kill.
@@ -947,7 +947,7 @@ Bots make the game alive with zero players online.
   blueprint, with nodes at room centers, room quadrants, doorways, and
   tunnel elbows. A* over the graph. Local avoidance uses 5 Rapier ray-cast
   "feelers" ahead.
-- **Stormtrooper aim [DECISION]:** bots put a lot of fire in the air and
+- **Near-miss aim [DECISION]:** bots put a lot of fire in the air and
   mostly miss. Getting shredded by a bot is not fun, while bolts snapping
   past your canopy is.
   - **Aim point:** the bot never aims at the target itself. It aims at a
