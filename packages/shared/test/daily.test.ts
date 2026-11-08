@@ -84,6 +84,13 @@ describe('daily challenge modes', () => {
 
     // solo mode: no bots at all
     expect(room.sim.shipList.filter((s) => s.isBot)).toHaveLength(0);
+    // du0 regression: no checkpoint sits on top of a live ship's spawn (first gate must be earned)
+    for (const cp of room.sim.course) {
+      for (const s of room.sim.shipList.filter((x) => x.alive)) {
+        const d = Math.hypot(cp.x - s.pos.x, cp.y - s.pos.y, cp.z - s.pos.z);
+        expect(d).toBeGreaterThan(1);
+      }
+    }
     // course built at match start, distinct points
     expect(room.sim.course.length).toBeGreaterThan(3);
     const first = room.sim.course;
@@ -101,7 +108,7 @@ describe('daily challenge modes', () => {
     expect(room.sim.match.phase).toBe('postMatch');
     expect(room.sim.match.winnerId).toBe(human.id);
 
-    // same seed -> same course
+    // same seed -> same course (same live-ship layout)
     const again = makeRoom('mine-run', 4242);
     again.room.sim.addPlayer('p:racer', 'Racer', 'dart');
     again.toInProgress();

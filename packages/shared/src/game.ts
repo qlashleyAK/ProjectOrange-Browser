@@ -367,7 +367,7 @@ export class GameSim {
     this.combatLog = [];
     this.wave = 0;
     this.waveNextAtTick = -1;
-    this.course = this.mode === 'mine-run' ? this.buildCourse() : [];
+    this.course = [];
     for (const s of this.shipList) {
       s.stats = { kills: 0, deaths: 0, assists: 0, damageDealt: 0, shotsFired: 0, shotsHit: 0, orangesCollected: 0, peakPower: 0 };
       s.checkpoint = 0;
@@ -376,11 +376,18 @@ export class GameSim {
     }
     resetPowerups(this);
     for (const s of this.shipList) this.spawnShip(s);
+    // mine-run course AFTER spawning: never on top of a pilot (du0 — first gate was free)
+    if (this.mode === 'mine-run') this.course = this.buildCourse();
   }
 
-  /** mine-run: seeded course over the arena's spawn points (every pilot flies the same line). */
+  /** mine-run: seeded course over the arena's spawn points, clear of live ships. */
   private buildCourse(): V3[] {
-    const spawns = this.arena.spawns.map((sp) => ({ ...sp.pos }));
+    const keepOut = 40;
+    const live = this.shipList.filter((s) => s.alive).map((s) => s.pos);
+    const clear = (p: { x: number; y: number; z: number }): boolean =>
+      live.every((l) => (p.x - l.x) ** 2 + (p.y - l.y) ** 2 + (p.z - l.z) ** 2 > keepOut * keepOut);
+    let spawns = this.arena.spawns.map((sp) => ({ ...sp.pos })).filter(clear);
+    if (spawns.length < Math.min(3, this.arena.spawns.length)) spawns = this.arena.spawns.map((sp) => ({ ...sp.pos }));
     const course: V3[] = [];
     while (course.length < MINE_RUN_CHECKPOINTS && spawns.length) {
       course.push(spawns.splice(this.rng.int(0, spawns.length - 1), 1)[0]!);
