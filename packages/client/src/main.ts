@@ -20,7 +20,7 @@ import { LightRig } from './render/lights';
 import { CheckpointRenderer } from './render/checkpoints';
 import { PowerupRenderer } from './render/powerups';
 import { MissileRenderer, PickupRenderer, ProjectileRenderer } from './render/projectiles';
-import { Renderer } from './render/renderer';
+import { Renderer, type QualityProfile } from './render/renderer';
 import { ShipRenderer } from './render/ships';
 import { onSettings, saveSettings, settings, touchMode, type Quality } from './settings';
 import { Menu } from './ui/menu';
@@ -167,14 +167,19 @@ async function boot(): Promise<void> {
     console.info(`${a.blueprint.name} ready in ${(performance.now() - t1).toFixed(0)} ms`);
   };
 
+  // every tier change (settings, the auto probe, or `orange.renderer.setQuality` from a benchmark) applies the whole profile
+  const applyProfile = (p: QualityProfile) => {
+    effects.debrisEnabled = p.debris;
+    effects.setDust(p.dust);
+    effects.setBudget(p.particles);
+    lights.dynamicLimit = p.dynamicLights;
+    lights.setShadowQuality(p.shadows);
+  };
+  renderer.onQuality(applyProfile);
+  applyProfile(renderer.profile);
   const applySettings = () => {
     if (settings.quality !== 'auto') renderer.setQuality(settings.quality);
     audio.applyVolumes();
-    effects.debrisEnabled = renderer.profile.debris;
-    effects.setDust(renderer.profile.dust);
-    effects.setBudget(renderer.profile.particles);
-    lights.dynamicLimit = renderer.profile.dynamicLights;
-    lights.setShadowQuality(renderer.profile.shadows);
   };
   onSettings(applySettings);
   applySettings();
