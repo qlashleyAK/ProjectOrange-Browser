@@ -206,7 +206,10 @@ export class BotBrain {
         // fire wherever it means to aim (mostly not at you); the seeker only cares where the target really is
         const aimErr = Math.acos(clamp(vdot(fwd, face), -1, 1));
         const seekErr = Math.acos(clamp(vdot(fwd, toT), -1, 1));
-        const cone = Math.max(6 * DEG, Math.atan2(target.def.boundingRadius + 3, dist));
+        // a proximity-fused shell only has to pass within fuse range to do splash damage, so its fire cone
+        // takes in the fuse and splash reach too (kx9: slow-turning Brutes held fire 69% of engaged time)
+        const reach = (w.proximity ?? 0) + (w.proximity ? w.splashRadius ?? 0 : 0);
+        const cone = Math.max(6 * DEG, Math.atan2(target.def.boundingRadius + 3 + reach, dist));
         if (reacted && aimErr < cone && dist < w.speed * w.life) out.flags |= InputFlag.Primary;
         // secondary: hold to lock, release when locked or after a while
         if (sim.tick >= this.nextMissileTick && (me.ammo > 0 || me.powerup === 'haste') && dist < me.def.secondary.lockRange && seekErr < me.def.secondary.lockConeDeg * DEG) {
