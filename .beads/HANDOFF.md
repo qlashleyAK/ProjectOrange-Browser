@@ -12,7 +12,8 @@ and comment that references them). Instead, hand them off:
    normal credentials:
    ```bash
    bd dolt pull
-   bd import < .beads/handoff/<file>.jsonl   # upserts by ID: re-run safe
+   bd import .beads/handoff/<file>.jsonl   # upserts by ID: re-run safe
+   # (pass the file, or `bd import - < file`: bd refuses bare redirected stdin)
    bd dolt push
    ```
 3. Point a commit message at `.beads/handoff/README.md` naming the beads.
