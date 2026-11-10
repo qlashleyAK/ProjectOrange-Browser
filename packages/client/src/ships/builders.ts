@@ -233,3 +233,70 @@ export function triangleCount(obj: THREE.Object3D): number {
   });
   return n;
 }
+
+// ------------------------------------------------------------------ detail helpers
+
+/**
+ * Box with every edge chamfered (one bevel step, flat-shaded): reads as machined plate where a raw box reads as a
+ * placeholder. About 60 triangles. Centered on the origin.
+ */
+export function chamferBox(w: number, h: number, d: number, c = Math.min(w, h, d) * 0.18): THREE.BufferGeometry {
+  const k = Math.max(1e-3, Math.min(c, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3));
+  const x = w / 2, y = h / 2;
+  const s = new THREE.Shape();
+  s.moveTo(-x + k, -y); s.lineTo(x - k, -y); s.lineTo(x, -y + k); s.lineTo(x, y - k);
+  s.lineTo(x - k, y); s.lineTo(-x + k, y); s.lineTo(-x, y - k); s.lineTo(-x, -y + k); s.closePath();
+  const depth = Math.max(1e-3, d - 2 * k);
+  // the caps sit inset by k (bevelOffset) and the sides reach the full outline, so the result spans w × h × d
+  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: k, bevelSize: k, bevelOffset: -k, bevelSegments: 1, curveSegments: 1 });
+  g.translate(0, 0, -depth / 2);
+  g.deleteAttribute('uv');
+  return g.index ? g.toNonIndexed() : g;
+}
+
+export interface Nozzle { shell: THREE.BufferGeometry; glow: THREE.BufferGeometry }
+
+/**
+ * Engine bell along +Z ending at `zEnd`: outer wall flaring to a lip, an inner wall running back to the throat,
+ * and a glow disc filling the bell a little way in, with a small dark turbine hub silhouetted in front of it, so
+ * the engine reads as lit from inside rather than painted on its end.
+ */
+export function bellNozzle(r: number, len: number, zEnd: number, seg = 14): Nozzle {
+  const z0 = zEnd - len;
+  const shell = lathe([
+    [z0, r * 0.9], [z0 + len * 0.55, r * 0.96], [zEnd, r * 1.08],
+    [zEnd, r * 0.9], [zEnd - len * 0.45, r * 0.68], [z0 + len * 0.2, r * 0.55],
+  ], seg);
+  const zGlow = z0 + len * 0.55; // where the inner wall is 0.68 r across
+  const hub = coneNegZ(r * 0.2, len * 0.25, 8);
+  hub.rotateY(Math.PI); // point the hub +Z, out of the bell
+  hub.translate(0, 0, zGlow + len * 0.125);
+  const glow = discZ(r * 0.68, seg);
+  glow.translate(0, 0, zGlow);
+  return { shell: mergeGeometries([shell, hub.toNonIndexed()], false)!, glow };
+}
+
+/**
+ * `n` slats across a w × h opening facing +Z, each tilted `tiltDeg` about X like louvers and `fill` of its pitch
+ * tall. Centered on the origin.
+ */
+export function grille(w: number, h: number, n: number, depth = 0.06, tiltDeg = 28, fill = 0.42): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const pitch = h / n;
+  for (let i = 0; i < n; i++) {
+    const g = new THREE.BoxGeometry(w, pitch * fill, depth).toNonIndexed();
+    g.rotateX(-tiltDeg * THREE.MathUtils.DEG2RAD);
+    g.translate(0, -h / 2 + pitch * (i + 0.5), 0);
+    g.deleteAttribute('uv');
+    parts.push(g);
+  }
+  return mergeGeometries(parts, false)!;
+}
+
+/** Upper half-ellipse arch (rx × ry) in the XY plane: canopy frames and hoops. */
+export function arch(rx: number, ry: number, tube: number, seg = 12): THREE.BufferGeometry {
+  const g = new THREE.TorusGeometry(1, tube, 4, seg, Math.PI);
+  g.scale(rx, ry, 1);
+  g.deleteAttribute('uv');
+  return g.toNonIndexed();
+}
