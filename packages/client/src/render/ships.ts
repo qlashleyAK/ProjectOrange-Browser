@@ -5,12 +5,48 @@ import { buildShip, type ShipModel } from '../ships/models';
 import type { ShipView } from '../view';
 import type { Effects, LightRequest } from './effects';
 
+/** Exhaust plume, unit radius at the nozzle (z 0) swelling slightly then tapering to a point at z 1. */
 const plumeGeo = (() => {
-  const g = new THREE.ConeGeometry(1, 1, 12, 1, true);
-  g.translate(0, -0.5, 0);
-  g.rotateX(-Math.PI / 2); // apex toward +Z (behind the ship), base at the nozzle
+  const profile: [number, number][] = [[0, 0.82], [0.08, 1.0], [0.2, 0.97], [0.4, 0.8], [0.6, 0.56], [0.8, 0.3], [1, 0.001]];
+  const g = new THREE.LatheGeometry(profile.map(([z, r]) => new THREE.Vector2(r, z)), 14);
+  g.rotateX(Math.PI / 2); // lathe axis Y → Z
   return g;
 })();
+
+export type PlumeMaterial = THREE.ShaderMaterial & { uniforms: { uColor: { value: THREE.Color }; uOpacity: { value: number }; uTime: { value: number }; uSeed: { value: number } } };
+
+/**
+ * Hot exhaust: a white core along the axis near the nozzle, the engine color outside it, flickering shock
+ * diamonds, and edges that fade with the view angle so the cone never shows a hard silhouette.
+ */
+function plumeMaterial(color: THREE.Color, seed: number): PlumeMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uColor: { value: color }, uOpacity: { value: 0.85 }, uTime: { value: 0 }, uSeed: { value: seed } },
+    vertexShader: /* glsl */ `
+      varying float vAlong; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vAlong = position.z;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal); vV = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor; uniform float uOpacity; uniform float uTime; uniform float uSeed;
+      varying float vAlong; varying vec3 vN; varying vec3 vV;
+      void main() {
+        float facing = abs(dot(normalize(vN), normalize(vV)));
+        float core = pow(facing, 3.0);
+        float along = clamp(vAlong, 0.0, 1.0);
+        float fade = pow(1.0 - along, 1.5) * smoothstep(0.0, 0.06, along + 0.02);
+        float diamonds = 0.82 + 0.18 * sin(along * 26.0 - uTime * 38.0 + uSeed);
+        float flicker = 0.9 + 0.1 * sin(uTime * 53.0 + uSeed * 3.1);
+        vec3 col = mix(uColor, vec3(max(uColor.r, max(uColor.g, uColor.b))), core * (1.0 - along) * 0.85);
+        float a = fade * (0.18 + 0.82 * core) * diamonds * flicker * uOpacity;
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  }) as PlumeMaterial;
+}
 
 const SPAWN_BUBBLE = new THREE.Color(0.5, 0.8, 1.0);
 const SAFE_BUBBLE = new THREE.Color(0.43, 1.0, 0.79);
@@ -80,7 +116,7 @@ interface Entry {
   key: string;
   root: THREE.Group;
   plumes: THREE.Mesh[];
-  plumeMat: THREE.MeshBasicMaterial;
+  plumeMat: PlumeMaterial;
   plumeBase: THREE.Color;
   aura: THREE.Mesh;
   auraKind: PowerupKind | null;
@@ -125,12 +161,14 @@ export class ShipRenderer {
 
   private create(v: ShipView): Entry {
     const model = buildShip(v.classId, v.accent);
+    // ships throw shadows onto the arena; they don't take them, so a soft low-res map never streaks the hull
+    for (const m of model.meshes) m.castShadow = true;
     const root = new THREE.Group();
     root.add(model.group);
     const accent = accentColor(v.accent);
     const faction = CLASSES[v.classId].faction;
     const base = new THREE.Color(faction === 'machine' ? 0xc04bff : 0x9fe8ff).lerp(accent, 0.25);
-    const plumeMat = new THREE.MeshBasicMaterial({ color: base.multiplyScalar(2.5), transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    const plumeMat = plumeMaterial(base.multiplyScalar(2.5), v.id * 1.7);
     const plumes = model.engines.map((a) => {
       const p = new THREE.Mesh(plumeGeo, plumeMat);
       p.position.copy(a.position);
@@ -152,7 +190,7 @@ export class ShipRenderer {
     root.add(aura);
     this.group.add(root);
     return {
-      view: v, model, key: `${v.classId}:${v.accent}`, root, plumes, plumeMat, plumeBase: plumeMat.color.clone(), aura, auraKind: null, auraT: 0, moteT: 0,
+      view: v, model, key: `${v.classId}:${v.accent}`, root, plumes, plumeMat, plumeBase: plumeMat.uniforms.uColor.value.clone(), aura, auraKind: null, auraT: 0, moteT: 0,
       bulwark, bubble, cloakMat: cloakMaterial(), cloakOn: false,
       smokeT: 0, rcsT: 0, lastPos: new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z), wasBulwark: false,
     };
@@ -175,8 +213,8 @@ export class ShipRenderer {
     if (k !== e.auraKind) {
       e.auraKind = k;
       e.auraT = 0;
-      if (k) e.plumeMat.color.copy(e.plumeBase).lerp(new THREE.Color(POWERUPS[k].color).multiplyScalar(2.5), 0.75);
-      else e.plumeMat.color.copy(e.plumeBase);
+      if (k) e.plumeMat.uniforms.uColor.value.copy(e.plumeBase).lerp(new THREE.Color(POWERUPS[k].color).multiplyScalar(2.5), 0.75);
+      else e.plumeMat.uniforms.uColor.value.copy(e.plumeBase);
     }
     e.aura.visible = !!k;
     if (!k) return;
@@ -246,6 +284,8 @@ export class ShipRenderer {
           if (v.shimmer) { m.userData.mat = m.material; m.material = e.cloakMat; } else if (m.userData.mat) m.material = m.userData.mat as THREE.Material;
         }
         if (e.model.eye) e.model.eye.visible = !v.shimmer;
+        // a cloaked ship's shadow on the wall would give away more than its faint shimmer does
+        for (const m of e.model.meshes) m.castShadow = !v.shimmer;
       }
       e.cloakMat.uniforms.uTime.value = t;
       e.cloakMat.uniforms.uAlpha.value = v.isLocal ? 0.18 : 0.1;
@@ -267,7 +307,8 @@ export class ShipRenderer {
         p.visible = !v.shimmer;
         p.scale.set(size, size, (0.6 + thrust * 2.6) * flicker * (def.id === 'brute' ? 1.4 : 1));
       }
-      e.plumeMat.opacity = v.boosting ? 1 : 0.8;
+      e.plumeMat.uniforms.uOpacity.value = v.boosting ? 1 : 0.8;
+      e.plumeMat.uniforms.uTime.value = t;
       this.updateAura(e, v, dt, t);
 
       // Mule RCS puffs when strafing / translating sideways

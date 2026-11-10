@@ -5,6 +5,7 @@ third-party software it builds on, per those projects' license terms.
 
 License census of the dependency tree (generated from `pnpm-lock.yaml` +
 the npm registry, 2026-10-18): 67 MIT, 3 Apache-2.0, 1 Zlib, 0 copyleft.
+Added since: `n8ao` (ISC, 2026-11-08).
 
 ## Notable dependencies
 
@@ -13,6 +14,7 @@ the npm registry, 2026-10-18): 67 MIT, 3 Apache-2.0, 1 Zlib, 0 copyleft.
 | [three.js](https://threejs.org) (`three`, `@types/three`) | MIT | rendering |
 | [Rapier](https://rapier.rs) — `@dimforge/rapier3d-deterministic-compat`, `@dimforge/rapier3d-compat` | Apache-2.0 | deterministic physics sim (client + server + bots) |
 | [postprocessing](https://github.com/pmndrs/postprocessing) | Zlib | render effects |
+| [n8ao](https://github.com/N8python/n8ao) | ISC (package.json); CC0-1.0 (LICENSE file) | screen-space ambient occlusion |
 | [TypeScript](https://www.typescriptlang.org) | Apache-2.0 | language/tooling |
 | [Vite](https://vite.dev) (`vite`, `@rolldown/*`) | MIT | client build |
 | [Vitest](https://vitest.dev) (`vitest`, `@vitest/*`) | MIT | tests |

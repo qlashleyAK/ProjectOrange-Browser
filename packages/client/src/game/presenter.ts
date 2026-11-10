@@ -14,7 +14,7 @@ const SECONDARIES = new Map(CLASS_LIST.map((c) => [c.secondary.id, c.secondary])
 const SHOT_SOUND: Record<string, SoundName> = { bolt: 'zap', pellet: 'shotgun', spine: 'shriek', flak: 'thump', slug: 'slug' };
 const LAUNCH_SOUND: Record<string, SoundName> = { missile: 'missileLaunch', swarm: 'swarmLaunch', torpedo: 'torpedoLaunch' };
 
-const WHITE = 0xffffff, CYAN = 0x9fe8ff, VIOLET = 0xb48cff, SHIELD = 0x7fc4ff;
+const WHITE = 0xffffff, CYAN = 0x9fe8ff, VIOLET = 0xb48cff, SHIELD = 0x7fc4ff, DEEP_VIOLET = 0x5a2cff;
 
 const v = (p: { x: number; y: number; z: number }, out = new THREE.Vector3()) => out.set(p.x, p.y, p.z);
 
@@ -45,6 +45,8 @@ export class Presenter {
         if (e.reason === 'world') {
           const p = v(e.pos);
           fx.sparksAt(p, null, CYAN, 6, 14, 0.25);
+          // a brief hot spot where the round struck
+          fx.moteAt(p, new THREE.Vector3(), CYAN, 1.1, 0.22, 0);
           if (this.camera.position.distanceTo(p) < 120) audio.play('worldPing', { pos: e.pos, gain: 0.25 });
         } else if (e.reason === 'proximity' || e.reason === 'repel') {
           fx.flash(v(e.pos), WHITE, 0.5, 3, 0.15, { tell: true, intensity: flashScale });
@@ -62,9 +64,10 @@ export class Presenter {
         if (e.reason === 'expire') { fx.flash(p, WHITE, 0.5, 2, 0.15, { intensity: flashScale }); break; }
         const big = e.reason === 'torpedo';
         fx.flash(p, big ? VIOLET : WHITE, 1, big ? 22 : 9, big ? 0.5 : 0.3, { tell: true, intensity: flashScale, light: big ? 4 : 2 });
-        fx.sphere(p, big ? VIOLET : CYAN, 1, big ? 18 : 7, big ? 0.45 : 0.3, 0.5, { tell: true });
+        fx.fireball(p, big ? VIOLET : CYAN, big ? DEEP_VIOLET : VIOLET, 1, big ? 17 : 6.5, big ? 0.75 : 0.45, { tell: true, intensity: flashScale });
+        if (big) this.burstRing(p, 3, 7, VIOLET, DEEP_VIOLET, 5, flashScale);
         fx.sparksAt(p, null, WHITE, big ? 40 : 18, big ? 40 : 25, 0.5);
-        fx.smokeAt(p, new THREE.Vector3(), big ? 6 : 3, 1.6);
+        this.smokeCloud(p, new THREE.Vector3(), big ? 6 : 3, big ? 4 : 2, 1.6);
         audio.play(big ? 'bigExplosion' : 'explosion', { pos: e.pos });
         this.shakeFrom(p, big ? 0.6 : 0.3, big ? 60 : 30);
         break;
@@ -114,11 +117,13 @@ export class Presenter {
         const vel = v(e.vel);
         const big = e.classId === 'brute';
         fx.flash(p, WHITE, 2, big ? 30 : 20, 0.55, { tell: true, intensity: flashScale, light: 5 });
-        fx.sphere(p, CYAN, 1, big ? 22 : 15, 0.5, 0.55, { tell: true });
+        // the hull goes up as a main fireball, then secondary bursts as the reactor and tanks follow it
+        fx.fireball(p, CYAN, VIOLET, 1.5, big ? 21 : 14, 0.8, { tell: true, intensity: flashScale });
+        this.burstRing(p, big ? 4 : 3, big ? 9 : 6, WHITE, CYAN, big ? 8 : 5.5, flashScale);
         fx.ring(p, null, VIOLET, 2, big ? 40 : 28, 0.6, 0.8, { tell: true });
         fx.sparksAt(p, null, WHITE, 50, 45, 0.7);
         fx.debrisAt(p, vel, 0x4a4f58, big ? 18 : 12, 18, big ? 1.4 : 1);
-        fx.smokeAt(p, vel.multiplyScalar(0.3), big ? 8 : 5, 2.5);
+        this.smokeCloud(p, vel.multiplyScalar(0.3), big ? 8 : 5, big ? 6 : 4, 2.5);
         audio.play('bigExplosion', { pos: e.pos, gain: 1.1 });
         if (e.killerId === localId && e.victimId !== localId) audio.play('killConfirm', { bus: 'ui' });
         if (e.victimId === localId) { audio.play('death', { bus: 'ui' }); this.cam.addTrauma(0.6); }
@@ -206,6 +211,24 @@ export class Presenter {
         else if (e.shipId === localId) audio.play('lockSolid', { bus: 'ui', gain: 0.5 });
         break;
       default: break;
+    }
+  }
+
+  /** `n` smaller fireballs scattered within `spread` m of `p`, each a beat behind the last. */
+  private burstRing(p: THREE.Vector3, n: number, spread: number, core: number, edge: number, size: number, intensity: number): void {
+    for (let i = 0; i < n; i++) {
+      const off = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(spread * (0.4 + Math.random() * 0.6));
+      this.effects.fireball(off.add(p), core, edge, 0.5, size * (0.6 + Math.random() * 0.5), 0.45 + Math.random() * 0.2,
+        { intensity: intensity * 0.8, delay: 0.06 + i * 0.07 + Math.random() * 0.05 });
+    }
+  }
+
+  /** A few overlapping puffs instead of one big disc, glowing from the blast at first. */
+  private smokeCloud(p: THREE.Vector3, vel: THREE.Vector3, size: number, puffs: number, life: number): void {
+    for (let i = 0; i < puffs; i++) {
+      const off = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(size * 0.8);
+      const drift = vel.clone().add(off.clone().multiplyScalar(0.6));
+      this.effects.smokeAt(off.add(p), drift, size * (0.6 + Math.random() * 0.5), life * (0.8 + Math.random() * 0.4), 0x5d626b, 1.6, 0.8);
     }
   }
 
