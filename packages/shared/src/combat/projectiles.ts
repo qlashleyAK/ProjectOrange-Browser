@@ -4,7 +4,7 @@ import type { GameSim } from '../game.js';
 import { segmentPointDistSq, segmentSphere, v3, vlen, type V3 } from '../math.js';
 import { castStatic } from '../physicsWorld.js';
 import { applyDamage, applySplash } from './damage.js';
-import { poseAt, segmentVsShip } from './hitVolumes.js';
+import { hitSphereWorld, poseAt, segmentVsShip } from './hitVolumes.js';
 import { endMissile } from './missiles.js';
 
 const _dir = v3(), _end = v3();
@@ -19,6 +19,25 @@ function detonate(sim: GameSim, p: Projectile, pos: V3, directId: number): void 
   if (w.splashRadius && w.splashDamage) {
     applySplash(sim, pos, w.splashRadius, (w.splashDamage * p.damage) / w.damage, w.splashMinFrac ?? 0, p.ownerId, w.id, directId);
   }
+}
+
+const _c = v3();
+
+/**
+ * Where along this tick's segment a shell flying past the ship is closest to one of its hit spheres, if that
+ * point lies within `fuse` m of the sphere's surface: 0 when it is already past its closest approach (receding),
+ * -1 when it is still closing (it will get nearer next tick) or never comes within range.
+ */
+export function closestApproachWithin(ship: Ship, a: V3, dir: V3, len: number, fuse: number): number {
+  let best = -1;
+  for (const hs of ship.def.hitSpheres) {
+    hitSphereWorld(_c, ship.pos, ship.rot, hs.c);
+    const t = Math.max(0, (_c.x - a.x) * dir.x + (_c.y - a.y) * dir.y + (_c.z - a.z) * dir.z);
+    if (t > len) continue;
+    const d = Math.hypot(a.x + dir.x * t - _c.x, a.y + dir.y * t - _c.y, a.z + dir.z * t - _c.z) - hs.r;
+    if (d <= fuse && (best < 0 || t < best)) best = t;
+  }
+  return best;
 }
 
 export function updateProjectiles(sim: GameSim): void {
@@ -53,13 +72,19 @@ export function updateProjectiles(sim: GameSim): void {
     }
 
     if (best < 0 && w.proximity) {
-      // proximity fuse (present time; exempt from lag compensation)
+      // Proximity fuse (present time; exempt from lag compensation). It is there to catch near misses, so it
+      // holds fire while the shell's flight line would still strike a ship (the direct hit lands on a later
+      // tick) and otherwise goes off at the point of closest approach. Firing on first entry into the fuse
+      // radius turned every well-aimed shell into a 4 m near miss doing ~2 splash damage instead of a direct
+      // hit (kx9: bot Brutes landed hits at a Dart's rate yet dealt a tenth of the damage).
       _end.x = p.pos.x + _dir.x * len; _end.y = p.pos.y + _dir.y * len; _end.z = p.pos.z + _dir.z * len;
+      const ahead = Math.max(len, speed * Math.max(0, p.endTick - sim.tick) * DT);
       for (const s of sim.shipList) {
         if (!s.alive || s.id === p.ownerId) continue;
         const reach = s.def.boundingRadius + w.proximity;
         if (segmentPointDistSq(p.pos, _end, s.pos) > reach * reach) continue;
-        const t = segmentVsShip(s, s.pos, s.rot, p.pos, _dir, len, w.proximity);
+        if (segmentVsShip(s, s.pos, s.rot, p.pos, _dir, ahead, w.radius) >= 0) continue;
+        const t = closestApproachWithin(s, p.pos, _dir, len, w.proximity);
         if (t >= 0 && (best < 0 || t < best)) { best = t; reason = 'proximity'; target = null; }
       }
     }

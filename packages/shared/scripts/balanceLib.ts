@@ -89,7 +89,11 @@ export function describeChange(p: Proposal): string {
 
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, ''));
 
-export interface ShipLine { classId: ClassId; kills: number; deaths: number; damage: number; placement: number; won: boolean }
+export interface ShipLine {
+  classId: ClassId; kills: number; deaths: number; damage: number; placement: number; won: boolean;
+  /** primary and secondary shots fired, and how many scored a direct hit (splash isn't counted) */
+  shots?: number; hits?: number;
+}
 
 /** One full FFA match: 8 bots, two per ship, pinned. Ends at match end (12 kills / 6 min) or `maxTicks`. */
 export function runMatch(seed: number, arenaId: string, skill: BotSkill, maxTicks = Math.round((7 * 60) / DT)): ShipLine[] {
@@ -102,12 +106,17 @@ export function runMatch(seed: number, arenaId: string, skill: BotSkill, maxTick
   }
   const lines = standings(sim.shipList).map((s, i) => ({
     classId: s.def.id, kills: s.stats.kills, deaths: s.stats.deaths, damage: Math.round(s.stats.damageDealt), placement: i + 1, won: i === 0,
+    shots: s.stats.shotsFired, hits: s.stats.shotsHit,
   }));
   sim.world.free();
   return lines;
 }
 
-export interface ClassSummary { kills: number; deaths: number; net: number; damage: number; placement: number; wins: number }
+export interface ClassSummary {
+  kills: number; deaths: number; net: number; damage: number; placement: number; wins: number;
+  /** direct hits per shot fired, or NaN when the lines carry no shot counts */
+  hitRate: number;
+}
 
 /** Per-ship averages over matches (per ship per match; wins = matches a ship of this class won). */
 export function summarize(matches: ShipLine[][]): Record<ClassId, ClassSummary> {
@@ -119,6 +128,7 @@ export function summarize(matches: ShipLine[][]): Record<ClassId, ClassSummary> 
     out[c] = {
       kills: sum((l) => l.kills) / n, deaths: sum((l) => l.deaths) / n, net: sum((l) => l.kills - l.deaths) / n,
       damage: sum((l) => l.damage) / n, placement: sum((l) => l.placement) / n, wins: matches.filter((m) => m.some((l) => l.won && l.classId === c)).length,
+      hitRate: lines.some((l) => l.shots !== undefined) ? sum((l) => l.hits ?? 0) / Math.max(1, sum((l) => l.shots ?? 0)) : NaN,
     };
   }
   return out;
@@ -146,7 +156,8 @@ export function formatReport(r: BalanceRun): string {
     const d = pairedDelta(r.a, r.b, c, (l) => l.kills - l.deaths);
     const z = d.se > 0 ? Math.abs(d.mean) / d.se : 0;
     const ship = c === r.proposal.ship ? `**${name(c)}** (changed)` : name(c);
-    return `| ${ship} | ${A[c].kills.toFixed(1)} → ${B[c].kills.toFixed(1)} | ${A[c].deaths.toFixed(1)} → ${B[c].deaths.toFixed(1)} | ${A[c].placement.toFixed(1)} → ${B[c].placement.toFixed(1)} | ${A[c].wins} → ${B[c].wins} | ${sign(d.mean)} ± ${d.se.toFixed(2)}${z >= 2 ? ' ✱' : ''} |`;
+    const pct = (x: number) => (Number.isNaN(x) ? '–' : `${(100 * x).toFixed(0)}%`);
+    return `| ${ship} | ${A[c].kills.toFixed(1)} → ${B[c].kills.toFixed(1)} | ${A[c].deaths.toFixed(1)} → ${B[c].deaths.toFixed(1)} | ${A[c].placement.toFixed(1)} → ${B[c].placement.toFixed(1)} | ${A[c].wins} → ${B[c].wins} | ${Math.round(A[c].damage)} → ${Math.round(B[c].damage)} | ${pct(A[c].hitRate)} → ${pct(B[c].hitRate)} | ${sign(d.mean)} ± ${d.se.toFixed(2)}${z >= 2 ? ' ✱' : ''} |`;
   });
   const d = pairedDelta(r.a, r.b, r.proposal.ship, (l) => l.kills - l.deaths);
   const z = d.se > 0 ? Math.abs(d.mean) / d.se : 0;
@@ -160,12 +171,12 @@ export function formatReport(r: BalanceRun): string {
     '',
     `${n} paired FFA matches (A = current tuning, B = proposed; same seed, map and bots per pair) · 8 ${r.skill} bots, two per ship · maps ${[...new Set(r.arenas)].join(', ')} · build ${r.version}`,
     '',
-    '| Ship | Kills / match | Deaths / match | Avg place (of 8) | Match wins | Δ net kills (B−A) |',
-    '|---|---|---|---|---|---|',
+    '| Ship | Kills / match | Deaths / match | Avg place (of 8) | Match wins | Damage / match | Direct-hit % | Δ net kills (B−A) |',
+    '|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
     verdict,
     '',
-    `<sub>Per ship per match. Δ = mean paired difference in kills − deaths ± standard error; ✱ = at least 2σ. Seeds ${r.seeds[0]}–${r.seeds.at(-1)}. Reproduce: \`pnpm balance ${r.proposal.ship} ${r.proposal.changes.map((c) => `${c.path}${c.op}${c.value}`).join(' ')} --matches ${n} --seed ${r.seeds[0]}\`</sub>`,
+    `<sub>Per ship per match. Direct-hit % = direct hits per shot fired (splash isn't counted), the number that tells "can't land it" from "lands it but can't convert". Δ = mean paired difference in kills − deaths ± standard error; ✱ = at least 2σ. Seeds ${r.seeds[0]}–${r.seeds.at(-1)}. Reproduce: \`pnpm balance ${r.proposal.ship} ${r.proposal.changes.map((c) => `${c.path}${c.op}${c.value}`).join(' ')} --matches ${n} --seed ${r.seeds[0]}\`</sub>`,
   ].join('\n');
 }

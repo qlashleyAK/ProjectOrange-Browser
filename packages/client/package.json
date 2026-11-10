@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json && tsc -p repro/tsconfig.json",
-    "repro": "tsx repro/repro.ts"
+    "repro": "tsx repro/repro.ts",
+    "bench": "tsx repro/bench.ts"
   },
   "dependencies": {
     "@orange/shared": "workspace:*",
