@@ -69,6 +69,11 @@ bd close <id>         # Complete work
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 
+**If you cannot push the Dolt remote** (403 from scoped git credentials):
+do not `bd create` replacement beads — export + hand off via
+`.beads/HANDOFF.md` (the folder + protocol; whoever pushes the board next
+sweeps it for you).
+
 ## Agent Context Profiles
 
 The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
