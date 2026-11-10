@@ -11,9 +11,10 @@ there's always someone to shoot.
 
 ![Project Orange gameplay: Dart, Mule, Scythe, and Brute in four arenas](assets/launch/gameplay.gif)
 
-**Watch the [30-second gameplay video](assets/launch/gameplay-30s.mp4)** (720p,
-60 fps). The footage shows Dart in Hollowdeep Mine, Mule in The Gyre, Scythe
-in Meridian Tower, and Brute in Gloamwood, all with the in-game HUD.
+**Watch the [30-second gameplay video](assets/launch/gameplay-30s.mp4)**
+(1600 × 900, 60 fps, High graphics). The footage shows Dart in Hollowdeep
+Mine, Mule in The Gyre, Scythe in Meridian Tower, and Brute in Gloamwood,
+then an orange drop and power pickup, all with the in-game HUD.
 
 ## The loop
 
