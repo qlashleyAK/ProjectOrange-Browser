@@ -146,3 +146,16 @@ place 7.3 → 6.3.
 2. The Mule's −0.94 under the wider cone needs a look at more seeds.
 3. Read every rerun with the balance table's damage and direct-hit
    columns, at 24 pairs or more.
+
+## Stacked-fix baseline (2026-11-10, post PR #5 + #7, n=24, seeds 1-24)
+
+| Ship | Kills | Deaths | Place | Wins | Damage | Direct-hit % |
+|---|---|---|---|---|---|---|
+| Dart | 5.0 | 2.6 | 2.7 | 15 | 1894 | 14% |
+| Mule | 3.6 | 3.9 | 4.3 | 4 | 1217 | 56% |
+| Scythe | 3.2 | 3.1 | 4.3 | 5 | 1447 | 12% |
+| Brute | 1.1 | 3.3 | 6.7 | 0 | 520 | 6% |
+
+Both fixes confirmed (reproduces PR #5's own measurement at n=24). The
+residual: 6% direct-hit (vs Dart 14%) and 3.3 deaths/match — survival and
+aim, not damage conversion, are what's left. Reproduce: `pnpm balance brute hull+=0 --matches 24 --seed 1`.
