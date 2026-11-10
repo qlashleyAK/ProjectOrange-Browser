@@ -99,14 +99,50 @@ Closer play doubles the Brute's direct-hit rate and kills, but its deaths
 rise in step, so net kills don't move. It trades more without trading
 better. Nothing shipped from this.
 
+**Step 3, Bulwark and focus-fire** (8 matches, normal bots, fixed fuse):
+
+| Ship | Deaths / match | Attackers in last 5 s before death | Share of time targeted | Bots on it when targeted |
+|---|---|---|---|---|
+| Dart | 2.7 | 2.14 | 47% | 1.51 |
+| Mule | 4.0 | 2.14 | 54% | 1.67 |
+| Scythe | 3.1 | 1.71 | 30% | 1.38 |
+| Brute | 3.4 | 1.81 | 37% | 1.32 |
+
+- **Focus-fire isn't the problem.** Brutes are targeted less than Darts or
+  Mules, by fewer bots, and die to fewer attackers.
+- **Bulwark is used.** It fires 7.6 times a match and absorbs 575 damage, 24%
+  of incoming. When a Brute died, Bulwark was on cooldown in 41 of 54 deaths;
+  only 5 had it ready but unused.
+- **The gap is offence.** While engaged, bot Brutes held the trigger only
+  31% of the time (Dart 48%, Scythe 49%) and were almost never short of
+  energy (4%).
+
+The bot only fires when its nose is within max(6°, the target's angular
+size + 3 m) of its wandering aim point, and the Brute turns at 70°/s.
+Flak doesn't need that precision: it detonates within 4 m and splashes
+5 m. So the bot's fire cone now also includes the fuse and splash reach
+for proximity-fused weapons. That's a bot-only change (`bots/brain.ts`),
+and only flak has a fuse.
+
+24 pairs, fuse fix alone vs plus the wider cone:
+
+| Ship | Kills / match | Deaths / match | Avg place | Damage / match | Δ net kills |
+|---|---|---|---|---|---|
+| Dart | 5.0 → 5.0 | 2.6 → 2.1 | 2.7 → 2.5 | 1894 → 1830 | +0.48 ± 0.44 |
+| Mule | 3.6 → 2.8 | 3.9 → 4.1 | 4.3 → 5.0 | 1217 → 1084 | −0.94 ± 0.46 ✱ |
+| Scythe | 3.2 → 3.5 | 3.1 → 3.5 | 4.3 → 4.2 | 1447 → 1504 | −0.04 ± 0.41 |
+| **Brute** | **1.1 → 1.5** | 3.3 → 3.2 | **6.7 → 6.3** | 520 → 580 | +0.50 ± 0.30 (1.7σ) |
+
+This is consistent in direction but not yet 2σ. It's kept because it's
+bot-only with a clear mechanism; drop the commit if the Mule cost matters.
+Against `master` (fuse plus cone), Brute kills go 0.6 → 1.5 and average
+place 7.3 → 6.3.
+
 ## Next steps (kx9 stays open)
 
-1. **Survival in close fights.** At 30–120 m Brutes die 4.6 times a match.
-   Check whether bots use Bulwark when they're actually being shot at: the
-   current habit is `recentDamage > 40` within 1 s, which may come too late
-   for a 46 m/s ship. Also check whether they retreat or break off.
-2. **Focus-fire.** Bots' target score favours low health and nearby
-   targets, and a large, slow Brute may be everyone's first pick. Count how
-   many attackers each class takes at once.
-3. Read every rerun with the balance table's new damage and direct-hit
+1. **Damage per shot fired.** Bot Brutes now fire more but convert poorly:
+   580 damage a match from flak rated 43 DPS. Check the aim lead for 170 m/s
+   shells at 150 m (about 0.9 s of flight), and whether the torpedo gets used.
+2. The Mule's −0.94 under the wider cone needs a look at more seeds.
+3. Read every rerun with the balance table's damage and direct-hit
    columns, at 24 pairs or more.
