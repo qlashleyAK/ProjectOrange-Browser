@@ -87,6 +87,44 @@ describe('weapons', () => {
     expect(s2.shield).toBeLessThan(s2.maxShield);
   });
 
+  // kx9: the fuse used to go off on first entry into its 4 m radius, so a shell flying straight at a ship always
+  // detonated 4 m short for ~2 splash damage and never landed its 18-damage direct hit.
+  it('flak aimed straight at a ship lands a direct hit instead of tripping its proximity fuse', () => {
+    const { sim, s1, s2 } = sim2('brute', 'mule');
+    place(sim, s1, OPEN); place(sim, s2, at(60), -1);
+    const flak = s1.def.primary;
+    sim.drainEvents();
+    sim.spawnProjectile(s1, flak, at(20), v3(flak.speed, 0, 0), flak.damage, 1, 0);
+    let end: string | undefined;
+    for (let i = 0; i < 60 && !end; i++) {
+      sim.step();
+      end = sim.drainEvents().find((e) => e.t === 'projEnd')?.reason;
+    }
+    expect(end).toBe('ship');
+    expect(s2.maxShield - s2.shield).toBeGreaterThanOrEqual(flak.damage);
+  });
+  it('flak passing a ship detonates near its closest approach, inside the fuse radius', () => {
+    const { sim, s1, s2 } = sim2('brute', 'mule');
+    place(sim, s1, OPEN); place(sim, s2, at(60), -1);
+    const flak = s1.def.primary;
+    // a level line beside the Mule that clears its hit volume but passes inside the 4 m fuse (facing ±X, its
+    // local x runs along world z)
+    const reach = Math.max(...s2.def.hitSpheres.map((h) => Math.abs(h.c.x) + h.r));
+    const off = reach + (flak.proximity ?? 0) * 0.6;
+    sim.drainEvents();
+    sim.spawnProjectile(s1, flak, v3(OPEN.x + 20, OPEN.y, OPEN.z + off), v3(flak.speed, 0, 0), flak.damage, 1, 0);
+    let ev: { reason: string; pos: { x: number } } | undefined;
+    for (let i = 0; i < 60 && !ev; i++) {
+      sim.step();
+      const e = sim.drainEvents().find((x) => x.t === 'projEnd');
+      if (e && e.t === 'projEnd') ev = e;
+    }
+    expect(ev?.reason).toBe('proximity');
+    // closest approach to the Mule (at +60) is level with it, not 4 m before its nose
+    expect(Math.abs(ev!.pos.x - (OPEN.x + 60))).toBeLessThan(s2.def.size.z / 2 + 1);
+    expect(s2.shield).toBeLessThan(s2.maxShield);
+  });
+
   it("Arc Slug's seek cone bends a shot onto a target a dumb-fire slug would have missed", () => {
     const { sim, s1, s2 } = sim2('mule', 'dart');
     s1.power = 8; sim.grantPower(s1, 0); // unlock the Arc Slug altPrimary
