@@ -201,8 +201,10 @@ async function main(): Promise<void> {
         try {
           const { token, handle } = JSON.parse(body || '{}') as { token?: string; handle?: string };
           if (!token) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'token required' })); return; }
+          // CF-proxied: the real client IP is cf-connecting-ip; direct hits fall back to the socket address
+          const ip = req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? null;
           res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-          res.end(JSON.stringify(ranked.join(token, String(handle ?? 'Pilot').slice(0, 16))));
+          res.end(JSON.stringify(ranked.join(token, String(handle ?? 'Pilot'), typeof ip === 'string' ? ip : null)));
         } catch {
           res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'bad json' }));
         }
