@@ -77,8 +77,8 @@ describe('RankedQueue', () => {
     q.leave('tokB'); // Starbuck leaves; Apollo (same IP) keeps waiting
     t = 46_000; // past the same-IP window
     const b = q.join('tokC', 'Helo', '7.7.7.7');
-    expect(b.status).toBe('matched'); // same-IP pair allowed after the window
-    expect(b.opponent).toBe('Apollo');
+    if (b.status !== 'matched') throw new Error(`expected matched, got ${b.status}`);
+    expect(b.opponent).toBe('Apollo'); // same-IP pair allowed after the window
     db.close();
   });
 
